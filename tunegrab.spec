@@ -4,6 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = []
 binaries = []
 hiddenimports = []
+datas.append(("tunegrab/assets/tunegrab.svg", "."))
 for package in ("yt_dlp", "mutagen"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas += package_datas

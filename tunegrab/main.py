@@ -25,6 +25,14 @@ from .theme import apply_theme
 KEY_ROLE = Qt.ItemDataRole.UserRole
 
 
+def app_icon() -> QIcon:
+    if getattr(sys, "frozen", False):
+        icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "tunegrab.svg"
+    else:
+        icon_path = Path(__file__).parent / "assets" / "tunegrab.svg"
+    return QIcon(str(icon_path)) if icon_path.is_file() else QIcon.fromTheme("audio-x-generic")
+
+
 def move_to_trash(path: str) -> bool:
     """Send a file to the Trash (freedesktop spec, so Dolphin can restore it).
 
@@ -147,7 +155,7 @@ class MainWindow(QMainWindow):
         self._download_active = False
 
         self.setWindowTitle(f"Tunegrab {__version__}")
-        self.setWindowIcon(QIcon.fromTheme("audio-x-generic"))
+        self.setWindowIcon(app_icon())
         self.resize(940, 680)
         self.checks: Optional[updater.Checks] = None
         self.checker: Optional[CheckWorker] = None
@@ -447,22 +455,22 @@ class MainWindow(QMainWindow):
 
         src = QHBoxLayout()
         src.addWidget(QLabel("Tunegrab update source (GitHub owner/repo):"))
-        self.repo_edit = QLineEdit(self.settings.value("update_repo", ""))
-        self.repo_edit.setPlaceholderText("e.g. yourname/tunegrab - leave empty to skip app updates")
-        managed = updater.is_managed_install()
-        self.repo_edit.setEnabled(not managed)
+        repo = self.settings.value("update_repo", "Senuth2004/tunegrab") or "Senuth2004/tunegrab"
+        self.repo_edit = QLineEdit(repo)
+        self.repo_edit.setPlaceholderText("GitHub owner/repository, e.g. Senuth2004/tunegrab")
+        self.repo_edit.textChanged.connect(
+            lambda value: self.settings.setValue("update_repo", value.strip()))
         src.addWidget(self.repo_edit, 1)
         v.addLayout(src)
         self.auto_check = QCheckBox("Check for updates when the app starts")
         self.auto_check.setChecked(self.settings.value("auto_check", True, type=bool))
-        self.auto_check.setEnabled(not managed)
+        self.auto_check.toggled.connect(lambda value: self.settings.setValue("auto_check", value))
         v.addWidget(self.auto_check)
 
         row = QHBoxLayout()
         self.check_btn = QPushButton("Check for updates")
-        self.check_btn.setEnabled(not managed)
         self.check_btn.clicked.connect(self.check_updates)
-        self.update_btn = QPushButton("Update everything")
+        self.update_btn = QPushButton("Get update")
         self.update_btn.setEnabled(False)
         self.update_btn.clicked.connect(self.run_update)
         row.addWidget(self.check_btn)
@@ -471,9 +479,9 @@ class MainWindow(QMainWindow):
         v.addLayout(row)
 
         if updater.is_managed_install():
-            note_text = ("This packaged copy cannot update itself. Install a newer Tunegrab build to update "
-                         "the app and its bundled components. ffmpeg is installed separately using your "
-                         "system package manager.")
+            note_text = ("Check for updates to see whether a newer Tunegrab release is available. "
+                         "Get update opens the release downloads; packaged apps cannot replace their "
+                         "own files. ffmpeg is installed separately using your system package manager.")
         else:
             note_text = ("yt-dlp and mutagen come from PyPI. Tunegrab itself comes from the latest GitHub "
                          "release of the source above. ffmpeg and PySide6 belong to your system; update "
@@ -496,8 +504,6 @@ class MainWindow(QMainWindow):
         return "Update available" if st.outdated else "Up to date"
 
     def check_updates(self) -> None:
-        if updater.is_managed_install():
-            return
         if self.checker is not None and self.checker.isRunning():
             return
         for key, val in (("update_repo", self.repo_edit.text().strip()),
@@ -519,7 +525,8 @@ class MainWindow(QMainWindow):
                 self.upd_table.setItem(r, c, QTableWidgetItem(text))
         n = len(checks.outdated)
         managed = updater.is_managed_install()
-        self.update_btn.setEnabled(n > 0 and not managed)
+        self.update_btn.setEnabled(n > 0)
+        self.update_btn.setText("Get update" if managed else "Update everything")
         self.tabs.setTabText(2, f"Update ({n})" if n else "Update")
         if managed and n:
             self.upd_log.appendPlainText(
@@ -533,6 +540,19 @@ class MainWindow(QMainWindow):
 
     def run_update(self) -> None:
         if self.checks is None or not self.checks.outdated:
+            return
+        if updater.is_managed_install():
+            repo = self.repo_edit.text().strip()
+            if not updater.REPO_RE.fullmatch(repo):
+                QMessageBox.warning(self, "Invalid update source",
+                                    "Enter a GitHub source in owner/repository format.")
+                return
+            url = QUrl(f"https://github.com/{repo}/releases/latest")
+            if QDesktopServices.openUrl(url):
+                self.upd_log.appendPlainText(f"Opened the Tunegrab release downloads: {url.toString()}")
+            else:
+                QMessageBox.warning(self, "Could not open release page",
+                                    "Open this address in your browser:\n" + url.toString())
             return
         if self.updater_thread is not None and self.updater_thread.isRunning():
             return

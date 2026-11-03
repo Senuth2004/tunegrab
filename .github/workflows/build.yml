@@ -57,6 +57,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cp install-launcher.sh dist/Tunegrab/
+          cp tunegrab/assets/tunegrab.svg dist/Tunegrab/
           tar -czf Tunegrab-linux-x86_64.tar.gz -C dist Tunegrab
       - name: Package Windows build
         if: runner.os == 'Windows'

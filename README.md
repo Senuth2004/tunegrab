@@ -150,11 +150,13 @@ can use with `yt-dlp --download-archive`.
 
 ## Updating
 
-Open the **Update** tab when running from a source install:
+Open the **Update** tab to check for current yt-dlp, mutagen and Tunegrab releases. The update
+source defaults to `Senuth2004/tunegrab` and can be changed to another GitHub `owner/repository`.
 
-- **Check for updates** compares yt-dlp and mutagen with the newest versions. It also runs when the
-  app starts (you can switch that off).
-- **Update everything** installs outdated Python dependencies and offers to restart.
+- **Check for updates** compares installed components with the newest releases. It also runs when
+  the app starts (you can switch that off).
+- In a source install, **Update everything** installs outdated Python dependencies and offers to
+  restart. In a packaged install, **Get update** opens the selected project's GitHub release page.
 
 What gets updated, and from where:
 
@@ -168,7 +170,7 @@ yt-dlp is the one to keep current. Sites change often and downloads stop working
 updated, so if downloads suddenly fail, update first.
 
 **Safety of dependency updates:** pip is run in the source installation's Python environment.
-App-code updates are installed from the relevant release archive rather than from inside the app.
+Packaged apps do not overwrite their installed files; use **Get update** to download a newer build.
 
 **Running from a git clone?** The in-app updater refuses to overwrite a clone. Update it with
 `git pull` and restart. Packaged builds cannot update themselves; install a newer build to update

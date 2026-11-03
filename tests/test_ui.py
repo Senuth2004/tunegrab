@@ -12,7 +12,7 @@ import tunegrab.main as main_mod
 from tunegrab import updater
 from tunegrab.downloader import Entry, Result
 from tunegrab.library import BLOCKED, Library
-from tunegrab.main import MainWindow
+from tunegrab.main import MainWindow, app_icon
 from tunegrab.theme import STYLESHEET, apply_theme
 
 
@@ -42,17 +42,54 @@ def test_dark_theme_uses_fusion_and_dark_surfaces():
     assert "#111318" in STYLESHEET and "#8b7cff" in STYLESHEET
 
 
-def test_managed_build_disables_in_app_updates(tmp_path, monkeypatch):
+def test_application_icon_is_available():
+    assert not app_icon().isNull()
+
+
+def test_managed_build_keeps_update_controls_available(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
     QApplication.instance() or QApplication([])
     win = MainWindow(Library(tmp_path / "lib.db"))
-    assert not win.check_btn.isEnabled()
+    assert win.repo_edit.isEnabled()
+    assert win.repo_edit.text() == "Senuth2004/tunegrab"
+    assert win.check_btn.isEnabled()
     assert not win.update_btn.isEnabled()
-    assert not win.auto_check.isEnabled()
+    assert win.auto_check.isEnabled()
+    win.repo_edit.setText("me/my-app")
+    assert win.settings.value("update_repo") == "me/my-app"
     win.lib.close()
+
+
+def test_managed_check_button_starts_version_check(win, monkeypatch):
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    calls = []
+
+    class FakeSignal:
+        def connect(self, callback):
+            pass
+
+    class FakeChecker:
+        def __init__(self, repo):
+            calls.append(("created", repo))
+            self.done = FakeSignal()
+            self.finished = FakeSignal()
+
+        def start(self):
+            calls.append(("started",))
+
+        def isRunning(self):
+            return False
+
+    monkeypatch.setattr(main_mod, "CheckWorker", FakeChecker)
+    win.repo_edit.setText("example/tunegrab")
+
+    win.check_btn.click()
+
+    assert calls == [("created", "example/tunegrab"), ("started",)]
+    assert not win.check_btn.isEnabled()
 
 
 def checked(w):
@@ -228,6 +265,30 @@ def test_update_tab_shows_status(win):
 
     win._checks_done(checks(outdated=False))
     assert not win.update_btn.isEnabled() and win.tabs.tabText(2) == "Update"
+
+
+def test_managed_update_opens_release_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    opened = []
+    monkeypatch.setattr(main_mod.QDesktopServices, "openUrl",
+                        lambda url: opened.append(url.toString()) or True)
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow(Library(tmp_path / "lib.db"))
+    window._checks_done(updater.Checks([
+        updater.Status("tunegrab", "0.3.1", "0.3.2"),
+        updater.Status("yt-dlp", "2026.1", "2026.2"),
+    ]))
+
+    assert window.update_btn.isEnabled()
+    assert window.update_btn.text() == "Get update"
+    window.run_update()
+
+    assert opened == ["https://github.com/Senuth2004/tunegrab/releases/latest"]
+    assert window.updater_thread is None
+    window.lib.close()
 
 
 def test_update_blocked_while_downloading(win, monkeypatch):
