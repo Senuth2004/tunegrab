@@ -180,6 +180,11 @@ the app and its bundled Python dependencies.
 `PATH`. On Fedora, use `sudo dnf install ffmpeg-free`; on Windows, use
 `winget install Gyan.FFmpeg.Shared`.
 
+**TLS certificate verification failed** - check that your system date and time are correct and
+your system CA certificates are current. On Fedora, run
+`sudo dnf reinstall ca-certificates && sudo update-ca-trust`. Tunegrab keeps HTTPS certificate
+verification enabled.
+
 **MP3 conversion fails on Fedora** - use the full ffmpeg from [RPM Fusion](https://rpmfusion.org):
 
 ```bash

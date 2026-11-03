@@ -1,5 +1,5 @@
 import pytest
-from tunegrab.downloader import parse_info
+from tunegrab.downloader import fetch_info, parse_info
 
 
 def test_single_song():
@@ -29,3 +29,31 @@ def test_empty_results_raise():
         parse_info(None)
     with pytest.raises(ValueError):
         parse_info({"_type": "playlist", "title": "x", "entries": []})
+
+
+def test_fetch_info_uses_system_certificate_store(monkeypatch):
+    seen = []
+
+    class FakeYDL:
+        def __init__(self, options):
+            seen.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            return {
+                "id": "abc",
+                "title": "Song",
+                "extractor_key": "Youtube",
+                "webpage_url": url,
+            }
+
+    monkeypatch.setattr("tunegrab.downloader.YoutubeDL", FakeYDL)
+    entries, _ = fetch_info("https://www.youtube.com/watch?v=abc")
+
+    assert entries[0].id == "abc"
+    assert seen[0]["compat_opts"] == ["no-certifi"]

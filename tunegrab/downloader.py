@@ -109,6 +109,7 @@ def fetch_info(url: str, song_only: bool = False) -> tuple[list[Entry], Optional
         "skip_download": True,
         "extract_flat": "in_playlist",
         "noplaylist": song_only,
+        "compat_opts": ["no-certifi"],
     }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -121,6 +122,7 @@ def build_opts(dest: Path, hook: Callable[[dict], None]) -> dict:
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,  # entries are already resolved one by one
+        "compat_opts": ["no-certifi"],
         "outtmpl": {"default": str(Path(dest) / FILENAME_TEMPLATE), "pl_thumbnail": ""},
         "writethumbnail": True,  # cover art is always fetched ...
         "postprocessors": [  # ... converted to jpg before the download starts

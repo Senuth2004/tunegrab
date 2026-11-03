@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         self.playlist_title: Optional[str] = None
         self.fetcher: Optional[FetchWorker] = None
         self.worker: Optional[DownloadWorker] = None
+        self._download_active = False
 
         self.setWindowTitle(f"Tunegrab {__version__}")
         self.setWindowIcon(QIcon.fromTheme("audio-x-generic"))
@@ -236,6 +237,8 @@ class MainWindow(QMainWindow):
         run = QHBoxLayout()
         self.download_btn = QPushButton("Download selected")
         self.download_btn.clicked.connect(self.start_download)
+        self.download_btn.setEnabled(False)
+        self.table.itemChanged.connect(self._download_selection_changed)
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.cancel_download)
@@ -273,8 +276,15 @@ class MainWindow(QMainWindow):
 
     def fetch(self) -> None:
         url = self.url.text().strip()
+        if self._download_active:
+            self.status.setText("Wait for the current downloads to finish before fetching another link.")
+            return
         if not url or (self.fetcher is not None and self.fetcher.isRunning()):
             return
+        self.entries = []
+        self.playlist_title = None
+        self.table.setRowCount(0)
+        self._update_download_button()
         self.fetch_btn.setEnabled(False)
         self.summary.setText("Looking up the link...")
         self.fetcher = FetchWorker(url, self.song_only.isChecked())
@@ -287,8 +297,19 @@ class MainWindow(QMainWindow):
         self.fetch_btn.setEnabled(True)  # keep the QThread object alive until the next fetch
 
     def _fetch_failed(self, msg: str) -> None:
-        self.summary.setText("")
-        QMessageBox.warning(self, "Could not read that link", msg)
+        self.summary.setText("Could not load tracks. Check the link and your network connection.")
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Could not read that link")
+        if "CERTIFICATE_VERIFY_FAILED" in msg:
+            box.setText(
+                "Tunegrab could not verify the site's security certificate. Check your system "
+                "date and make sure your system CA certificates are up to date."
+            )
+        else:
+            box.setText("Tunegrab could not load this link. Check the link and your network connection.")
+        box.setDetailedText(msg)
+        box.exec()
 
     def _fetched(self, entries: list, title: Optional[str]) -> None:
         self.entries, self.playlist_title = entries, title
@@ -309,6 +330,20 @@ class MainWindow(QMainWindow):
         self.summary.setText(f"{kind} - {len(entries)} track(s), {known} already known.")
         self.bar.setValue(0)
         self.status.setText("")
+        self._update_download_button()
+
+    def _download_selection_changed(self, item: QTableWidgetItem) -> None:
+        if item.column() == 0:
+            self._update_download_button()
+
+    def _update_download_button(self) -> None:
+        has_selected = False
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                has_selected = True
+                break
+        self.download_btn.setEnabled(bool(self.entries and has_selected and not self._download_active))
 
     def _checked_jobs(self) -> list[tuple[int, Entry]]:
         return [(r, self.entries[r]) for r in range(len(self.entries))
@@ -333,6 +368,7 @@ class MainWindow(QMainWindow):
         jobs = self._checked_jobs()
         if not jobs:
             self.status.setText("Nothing selected.")
+            self._update_download_button()
             return
         dest = Path(self.folder.text()).expanduser()
         if self.playlist_title and self.own_folder.isChecked():
@@ -348,7 +384,9 @@ class MainWindow(QMainWindow):
         self.worker.track_done.connect(self._track_done)
         self.worker.track_failed.connect(self._track_failed)
         self.worker.finished_all.connect(self._all_done)
+        self._download_active = True
         self.download_btn.setEnabled(False)
+        self.fetch_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.worker.start()
 
@@ -372,6 +410,7 @@ class MainWindow(QMainWindow):
         self.lib.add_downloaded(res.key, res.title, res.uploader, res.path, playlist)
         self._set_status(row, "Done" if res.has_thumbnail else "Done (no cover art offered)")
         self.table.item(row, 0).setCheckState(Qt.CheckState.Unchecked)
+        self._update_download_button()
 
     def _track_failed(self, row: int, msg: str) -> None:
         self._jobs_done += 1
@@ -381,7 +420,10 @@ class MainWindow(QMainWindow):
 
     def _all_done(self, ok: int, failed: int, cancelled: bool) -> None:
         self.download_btn.setEnabled(True)
+        self.fetch_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
+        self._download_active = False
+        self._update_download_button()
         msg = f"{ok} downloaded, {failed} failed" + (", cancelled" if cancelled else "")
         self.status.setText(msg)
         self.bar.setValue(100 if not cancelled else self.bar.value())

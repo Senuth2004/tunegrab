@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 import tunegrab.main as main_mod
 from tunegrab import updater
@@ -83,6 +83,66 @@ def test_single_song_summary(win):
     win._fetched(entries()[:1], None)
     assert "Single song" in win.summary.text()
     assert win.download_btn.isEnabled()
+
+
+def test_track_selection_buttons_update_download_button(win):
+    win.lib.add_downloaded("youtube id1", "Song 1", "", "/gone.m4a", "My list")
+    win._fetched(entries(), "My list")
+    buttons = {button.text(): button for button in win.findChildren(main_mod.QPushButton)}
+
+    buttons["Select none"].click()
+    assert checked(win) == [False, False, False]
+    assert not win.download_btn.isEnabled()
+
+    buttons["Select all"].click()
+    assert checked(win) == [True, True, True]
+    assert win.download_btn.isEnabled()
+
+    buttons["Select new only"].click()
+    assert checked(win) == [True, False, True]
+    assert win.download_btn.isEnabled()
+
+
+def test_browse_button_updates_folder(win, monkeypatch):
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *args: "/tmp/Music")
+    browse = next(button for button in win.findChildren(main_mod.QPushButton)
+                  if button.text() == "Browse...")
+
+    browse.click()
+
+    assert win.folder.text() == "/tmp/Music"
+
+
+def test_failed_fetch_clears_stale_tracks_and_disables_download(win, monkeypatch):
+    win._fetched(entries(), "Old playlist")
+    assert win.download_btn.isEnabled()
+
+    class FakeWorker:
+        def __init__(self, url, song_only):
+            self.url = url
+            self.song_only = song_only
+            self.done = FakeSignal()
+            self.failed = FakeSignal()
+            self.finished = FakeSignal()
+
+        def isRunning(self):
+            return False
+
+        def start(self):
+            pass
+
+    class FakeSignal:
+        def connect(self, callback):
+            pass
+
+    monkeypatch.setattr(main_mod, "FetchWorker", FakeWorker)
+    monkeypatch.setattr(QMessageBox, "exec", lambda *args: QMessageBox.StandardButton.Ok)
+    win.url.setText("https://example.invalid/video")
+    win.fetch()
+    assert win.table.rowCount() == 0
+    assert not win.download_btn.isEnabled()
+    win._fetch_failed("network error")
+    assert "Could not load tracks" in win.summary.text()
 
 
 def test_track_done_records_in_library(win, tmp_path):

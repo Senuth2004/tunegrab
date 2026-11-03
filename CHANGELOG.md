@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+- Fixed TLS certificate verification in Linux release builds by using the system CA store.
+- Fixed download button state and selection behavior when fetching or changing tracks.
+- Fixed quoting of the KDE launcher working directory.
+
 ## 0.3.0
 - Added a consistent modern dark theme across Linux and Windows.
 - Added standalone Linux and Windows release builds.
