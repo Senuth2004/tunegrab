@@ -1,0 +1,3 @@
+PySide6-Essentials
+yt-dlp
+mutagen        # needed to embed cover art in .opus files
