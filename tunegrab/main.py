@@ -20,6 +20,7 @@ from yt_dlp.utils import DownloadCancelled, sanitize_filename
 from . import __version__, updater
 from .downloader import DEFAULT_FORMAT, FORMATS, Entry, Result, download_entry, fetch_info
 from .library import BLOCKED, DOWNLOADED, Library
+from .theme import apply_theme
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
 
@@ -125,8 +126,12 @@ class UpdateWorker(QThread):
 
 
 def restart_app() -> None:
-    subprocess.Popen([sys.executable, "-m", "tunegrab"], cwd=str(updater.PROJECT_ROOT),
-                     start_new_session=True)
+    options = {"cwd": str(updater.PROJECT_ROOT)}
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    subprocess.Popen([sys.executable, "-m", "tunegrab"], **options)
     QApplication.quit()
 
 
@@ -153,7 +158,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(lambda i: self.refresh_library() if i == 1 else None)
         self.setCentralWidget(self.tabs)
         self.refresh_library()
-        if self.auto_check.isChecked():
+        if self.auto_check.isChecked() and not updater.is_managed_install():
             QTimer.singleShot(1500, self.check_updates)
 
     # ------------------------------------------------------------------ download tab
@@ -313,11 +318,17 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.isRunning():
             return
         if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+            if sys.platform == "win32":
+                install_hint = "Windows: install FFmpeg (for example, winget install Gyan.FFmpeg.Shared)."
+            elif sys.platform == "darwin":
+                install_hint = "macOS: install FFmpeg with  brew install ffmpeg."
+            else:
+                install_hint = "Linux: install ffmpeg and ffprobe with your distribution's package manager."
             QMessageBox.warning(
                 self, "ffmpeg is missing",
                 "ffmpeg and ffprobe are needed to convert audio and embed cover art.\n\n"
-                "Fedora:  sudo dnf install ffmpeg-free\n"
-                "(if mp3 conversion fails, use the full ffmpeg from RPM Fusion)")
+                f"{install_hint}\n"
+                "On Fedora, install ffmpeg-free; MP3 may require the full FFmpeg from RPM Fusion.")
             return
         jobs = self._checked_jobs()
         if not jobs:
@@ -396,14 +407,18 @@ class MainWindow(QMainWindow):
         src.addWidget(QLabel("Tunegrab update source (GitHub owner/repo):"))
         self.repo_edit = QLineEdit(self.settings.value("update_repo", ""))
         self.repo_edit.setPlaceholderText("e.g. yourname/tunegrab - leave empty to skip app updates")
+        managed = updater.is_managed_install()
+        self.repo_edit.setEnabled(not managed)
         src.addWidget(self.repo_edit, 1)
         v.addLayout(src)
         self.auto_check = QCheckBox("Check for updates when the app starts")
         self.auto_check.setChecked(self.settings.value("auto_check", True, type=bool))
+        self.auto_check.setEnabled(not managed)
         v.addWidget(self.auto_check)
 
         row = QHBoxLayout()
         self.check_btn = QPushButton("Check for updates")
+        self.check_btn.setEnabled(not managed)
         self.check_btn.clicked.connect(self.check_updates)
         self.update_btn = QPushButton("Update everything")
         self.update_btn.setEnabled(False)
@@ -413,9 +428,15 @@ class MainWindow(QMainWindow):
         row.addStretch(1)
         v.addLayout(row)
 
-        note = QLabel("yt-dlp and mutagen come from PyPI. Tunegrab itself comes from the latest GitHub "
-                      "release of the source above. ffmpeg and PySide6 belong to your system: update them "
-                      "with  sudo dnf upgrade.")
+        if updater.is_managed_install():
+            note_text = ("This packaged copy cannot update itself. Install a newer Tunegrab build to update "
+                         "the app and its bundled components. ffmpeg is installed separately using your "
+                         "system package manager.")
+        else:
+            note_text = ("yt-dlp and mutagen come from PyPI. Tunegrab itself comes from the latest GitHub "
+                         "release of the source above. ffmpeg and PySide6 belong to your system; update "
+                         "them with your system package manager.")
+        note = QLabel(note_text)
         note.setWordWrap(True)
         v.addWidget(note)
         self.upd_log = QPlainTextEdit()
@@ -433,6 +454,8 @@ class MainWindow(QMainWindow):
         return "Update available" if st.outdated else "Up to date"
 
     def check_updates(self) -> None:
+        if updater.is_managed_install():
+            return
         if self.checker is not None and self.checker.isRunning():
             return
         for key, val in (("update_repo", self.repo_edit.text().strip()),
@@ -453,9 +476,14 @@ class MainWindow(QMainWindow):
                                       self._upd_status_text(st))):
                 self.upd_table.setItem(r, c, QTableWidgetItem(text))
         n = len(checks.outdated)
-        self.update_btn.setEnabled(n > 0)
+        managed = updater.is_managed_install()
+        self.update_btn.setEnabled(n > 0 and not managed)
         self.tabs.setTabText(2, f"Update ({n})" if n else "Update")
-        self.upd_log.appendPlainText(f"{n} update(s) available." if n else "Everything is up to date.")
+        if managed and n:
+            self.upd_log.appendPlainText(
+                f"{n} update(s) available. Install a newer Tunegrab build to update bundled components.")
+        else:
+            self.upd_log.appendPlainText(f"{n} update(s) available." if n else "Everything is up to date.")
         if checks.release and any(s.name == "tunegrab" and s.outdated for s in checks.statuses):
             notes = checks.release.notes.strip()[:600]
             self.upd_log.appendPlainText(f"Tunegrab {checks.release.version}:\n{notes}" if notes
@@ -620,6 +648,7 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
+    apply_theme(app)
     app.setApplicationName("tunegrab")
     app.setDesktopFileName("tunegrab")
     data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))

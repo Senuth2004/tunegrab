@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import tunegrab.main as main_mod
@@ -12,6 +13,7 @@ from tunegrab import updater
 from tunegrab.downloader import Entry, Result
 from tunegrab.library import BLOCKED, Library
 from tunegrab.main import MainWindow
+from tunegrab.theme import STYLESHEET, apply_theme
 
 
 @pytest.fixture()
@@ -31,6 +33,26 @@ def win(tmp_path, monkeypatch):
 
 def entries():
     return [Entry(key=f"youtube id{i}", id=f"id{i}", title=f"Song {i}", url=f"https://x/{i}") for i in range(3)]
+
+
+def test_dark_theme_uses_fusion_and_dark_surfaces():
+    app = QApplication.instance() or QApplication([])
+    apply_theme(app)
+    assert app.palette().color(QPalette.ColorRole.Window).name() == "#15181e"
+    assert "#111318" in STYLESHEET and "#8b7cff" in STYLESHEET
+
+
+def test_managed_build_disables_in_app_updates(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    QApplication.instance() or QApplication([])
+    win = MainWindow(Library(tmp_path / "lib.db"))
+    assert not win.check_btn.isEnabled()
+    assert not win.update_btn.isEnabled()
+    assert not win.auto_check.isEnabled()
+    win.lib.close()
 
 
 def checked(w):

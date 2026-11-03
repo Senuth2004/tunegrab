@@ -62,6 +62,11 @@ def installed_version(name: str) -> Optional[str]:
         return None
 
 
+def is_managed_install() -> bool:
+    """Packaged app builds must be updated by their installer, not by pip or file replacement."""
+    return bool(getattr(sys, "frozen", False) or os.environ.get("FLATPAK_ID"))
+
+
 # ---------------------------------------------------------------- network
 def _check_url(url: str) -> None:
     p = urlparse(url)
@@ -130,8 +135,9 @@ def latest_app_release(repo: str, api_base: Optional[str] = None) -> AppRelease:
     tag = str(data.get("tag_name") or "")
     if not version_tuple(tag):
         raise UpdateError("The latest release has no version number in its tag (e.g. v0.3.0).")
-    url = next((a.get("browser_download_url") for a in data.get("assets") or []
-                if str(a.get("name", "")).lower().endswith(".zip")), None) or data.get("zipball_url")
+    source_asset = next((a.get("browser_download_url") for a in data.get("assets") or []
+                         if str(a.get("name", "")).lower() == "tunegrab-source.zip"), None)
+    url = source_asset or data.get("zipball_url")
     if not url:
         raise UpdateError("The latest release has no zip file.")
     return AppRelease(tag.lstrip("vV"), str(data.get("body") or ""), url)
@@ -265,6 +271,8 @@ def install_app_update(zip_path: Path, current_version: str, package_dir: Path =
 
 def run_update(checks: Checks, log: Callable[[str], None]) -> bool:
     """Apply everything that is outdated. Returns True when a restart is needed."""
+    if is_managed_install():
+        raise UpdateError("Install a newer Tunegrab package to update this managed app.")
     changed = False
     deps = [s.name for s in checks.outdated if s.name != "tunegrab"]
     if deps:

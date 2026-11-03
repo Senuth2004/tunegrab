@@ -1,17 +1,16 @@
 # Tunegrab
 
-A small desktop app for **KDE Plasma and Linux** that downloads songs and whole playlists as audio
-files with **cover art and tags**, remembers what you already have, and keeps itself up to date.
-It is a Qt front end for [yt-dlp](https://github.com/yt-dlp/yt-dlp), so it follows your Plasma
-colour scheme automatically.
+A cross-platform desktop app for **Linux and Windows** that downloads songs and whole playlists as
+audio files with **cover art and tags**, and remembers what you already have. It is built with Qt
+and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a consistent dark theme on every platform.
 
 <!-- Add a screenshot: save one to docs/screenshot.png and uncomment the next line.
 ![Tunegrab](docs/screenshot.png)
 -->
 
-> **Status: early (0.2).** The download and update pipelines are covered by automated tests that run
-> against a local test server, but the app has had little testing against live sites. Please open an
-> issue if something breaks.
+> **Status: early development.** Automated tests cover the library, UI, updater and download
+> pipeline. Automated release builds are configured for Linux and Windows; please report
+> platform-specific problems in the issue tracker.
 
 ## Features
 
@@ -22,7 +21,8 @@ colour scheme automatically.
 - **Download archive:** every download is recorded, so known tracks are skipped next time.
 - **Library tab** with search. Deleting moves the file to the Trash and you choose:
   *never download again* (the track stays in the archive) or *allow re-download*.
-- **Update tab:** updates yt-dlp, mutagen and Tunegrab itself from inside the app.
+- **Update tab:** source installs can update yt-dlp and mutagen. Install a newer app release to
+  update Tunegrab itself.
 - **Export** the archive as a yt-dlp compatible `archive.txt`.
 
 ## Installation
@@ -31,12 +31,12 @@ colour scheme automatically.
 
 | What | Why |
 |---|---|
-| Python 3.10 or newer | runs the app |
+| Python 3.10 or newer | runs from source |
 | ffmpeg **and** ffprobe | converts audio and embeds cover art |
-| PySide6 (Qt 6) | the window (installed by pip below) |
-| yt-dlp, mutagen | downloading; mutagen is needed for cover art in `.opus` files (installed by pip below) |
+| PySide6 (Qt 6) | the window (included in the source-install dependencies) |
+| yt-dlp, mutagen | downloading and cover art in `.opus` files (included in the source-install dependencies) |
 
-### Fedora (KDE) - step by step
+### Fedora (KDE) - run from source
 
 **1. Install the system packages**
 
@@ -86,7 +86,7 @@ python3 -m venv --system-site-packages .venv
 
 Then search for "Tunegrab" in the KDE launcher. Run the script again if you move the folder.
 
-### Other distributions
+### Other Linux distributions
 
 The steps are the same, only the system packages differ:
 
@@ -96,8 +96,33 @@ The steps are the same, only the system packages differ:
 | Arch / Manjaro | `sudo pacman -S git python ffmpeg` |
 | openSUSE | `sudo zypper install git python3 ffmpeg` |
 
-Then continue with steps 2 to 5 above. Under GNOME or other desktops it works too; it just uses
-that desktop's Qt styling.
+Then continue with steps 2 to 5 above. Other Linux desktops are supported too.
+
+### Ready-to-run builds (Linux and Windows)
+
+The project builds separate Linux and Windows archives for tagged releases. If no release is listed
+on the [GitHub Releases page](https://github.com/Senuth2004/tunegrab/releases), install from source
+using the steps below.
+
+Download and extract the archive for your operating system. On Linux, run `./Tunegrab`, or run
+`./install-launcher.sh` from the extracted folder to add Tunegrab to KDE's application launcher.
+On Windows, run `Tunegrab.exe` from the extracted folder. Packaged builds include Python and the
+app's Python dependencies; install FFmpeg separately and ensure `ffmpeg` and `ffprobe` are on `PATH`.
+
+### Windows
+
+Install Python 3.10 or newer and FFmpeg, then get the source and install dependencies:
+
+```powershell
+winget install Gyan.FFmpeg.Shared
+git clone https://github.com/Senuth2004/tunegrab.git
+cd tunegrab
+py -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m tunegrab
+```
+
+Restart your terminal after installing FFmpeg so it is available on `PATH`.
 
 ## Using it
 
@@ -111,7 +136,8 @@ other; change `FILENAME_TEMPLATE` in `tunegrab/downloader.py` if you prefer anot
 
 ### The archive and deleting songs
 
-Tunegrab keeps a small database in `~/.local/share/tunegrab/library.db`.
+Tunegrab keeps its library database in the platform's application-data folder (for example,
+`~/.local/share/tunegrab/library.db` on Linux).
 
 | Action (Library tab) | File | Track in archive |
 |---|---|---|
@@ -119,39 +145,40 @@ Tunegrab keeps a small database in `~/.local/share/tunegrab/library.db`.
 | **Delete - allow re-download** | moved to the Trash | removed, counts as new again |
 | **Unblock** | - | removes a "never again" entry |
 
-Files you delete in Dolphin show up as *File missing*. **Export archive.txt** writes a file you can
-use with `yt-dlp --download-archive`.
+Files deleted outside Tunegrab show up as *File missing*. **Export archive.txt** writes a file you
+can use with `yt-dlp --download-archive`.
 
 ## Updating
 
-Open the **Update** tab:
+Open the **Update** tab when running from a source install:
 
-- **Check for updates** compares your versions with the newest ones. It also runs when the app
-  starts (you can switch that off).
-- **Update everything** installs what is outdated and offers to restart.
+- **Check for updates** compares yt-dlp and mutagen with the newest versions. It also runs when the
+  app starts (you can switch that off).
+- **Update everything** installs outdated Python dependencies and offers to restart.
 
 What gets updated, and from where:
 
 | Component | Source |
 |---|---|
-| yt-dlp, mutagen | PyPI (`pip install --upgrade` in the app's own environment) |
-| Tunegrab itself | the latest **GitHub release** of the repo entered under *Update source* (for example `Senuth2004/tunegrab`) |
-| ffmpeg, PySide6 | your system: `sudo dnf upgrade` |
+| yt-dlp, mutagen | PyPI (`pip install --upgrade` in the source installation's Python environment) |
+| Tunegrab itself | download the latest source archive or platform build from GitHub Releases |
+| ffmpeg, PySide6 | your system package manager |
 
 yt-dlp is the one to keep current. Sites change often and downloads stop working until yt-dlp is
 updated, so if downloads suddenly fail, update first.
 
-**Safety of the self-update:** HTTPS only (also for redirects), size limits, zip paths are checked,
-the downloaded code is never run before it replaces the old one, and the old version is kept in
-`.backup/tunegrab-<version>` (to roll back, copy it back over the `tunegrab/` folder). Updates are
-blocked while downloads are running.
+**Safety of dependency updates:** pip is run in the source installation's Python environment.
+App-code updates are installed from the relevant release archive rather than from inside the app.
 
 **Running from a git clone?** The in-app updater refuses to overwrite a clone. Update it with
-`git pull` and restart. The in-app app-update is meant for copies installed from a ZIP.
+`git pull` and restart. Packaged builds cannot update themselves; install a newer build to update
+the app and its bundled Python dependencies.
 
 ## Troubleshooting
 
-**"ffmpeg is missing" dialog** - install it: `sudo dnf install ffmpeg-free` (Fedora).
+**"ffmpeg is missing" dialog** - install FFmpeg and make sure both `ffmpeg` and `ffprobe` are on
+`PATH`. On Fedora, use `sudo dnf install ffmpeg-free`; on Windows, use
+`winget install Gyan.FFmpeg.Shared`.
 
 **MP3 conversion fails on Fedora** - use the full ffmpeg from [RPM Fusion](https://rpmfusion.org):
 
@@ -187,22 +214,24 @@ for every format and cover type and checks the finished file with ffprobe.
 tunegrab/
   __main__.py     entry point (python -m tunegrab)
   main.py         Qt window: download, library and update tabs
+  theme.py        shared dark theme
   downloader.py   yt-dlp wrapper (no Qt)
   library.py      SQLite library and archive (no Qt)
   updater.py      PyPI and GitHub updates (no Qt)
+packaging/        frozen-app entry point
 tests/            pytest suite
-install-launcher.sh   adds Tunegrab to the KDE launcher
+.github/workflows/ builds and tests Linux and Windows releases
+install-launcher.sh   adds a Linux build to the KDE launcher
 ```
 
 ### Publishing a new version
 
-1. Raise `__version__` in `tunegrab/__init__.py` and add a line to `CHANGELOG.md`.
-2. Commit, then tag and push: `git tag v0.3.0 && git push origin main --tags`
-3. On GitHub open **Releases -> Draft a new release**, choose the tag and publish
-   (or `gh release create v0.3.0 --title "Tunegrab 0.3.0" --notes "What changed"`).
-
-GitHub's automatic source ZIP is enough; the updater only needs a zip that contains the `tunegrab/`
-package folder. Installed copies then offer the update on their next check.
+1. Update `__version__` in `tunegrab/__init__.py` and add a section to `CHANGELOG.md`.
+2. Push the changes to `main`, then create and push a matching version tag, for example:
+   `git tag v0.3.0 && git push origin main --tags`.
+3. The workflow tests the project, builds Linux and Windows archives, and attaches them to a GitHub
+   release. Users download and install the new archive for their platform; source checkouts can
+   update with `git pull`.
 
 ## Responsible use
 

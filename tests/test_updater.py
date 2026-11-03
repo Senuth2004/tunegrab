@@ -54,8 +54,10 @@ def fake_github(tmp_path):
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
-    state["release"] = {"tag_name": "v0.3.0", "body": "Faster fetching",
-                        "assets": [{"name": "tunegrab.zip", "browser_download_url": f"{base}/release.zip"}]}
+    state["release"] = {"tag_name": "v0.3.0", "body": "Modern dark UI and cross-platform builds",
+                        "assets": [{"name": "tunegrab-source.zip",
+                                    "browser_download_url": f"{base}/release.zip"}],
+                        "zipball_url": f"{base}/release.zip"}
     yield base, state
     srv.shutdown()
 
@@ -80,7 +82,8 @@ def make_install(tmp_path, version="0.2.0") -> Path:
 def test_latest_release_lookup(fake_github):
     base, state = fake_github
     rel = updater.latest_app_release("me/tunegrab", api_base=base)
-    assert rel.version == "0.3.0" and rel.notes == "Faster fetching" and rel.url.endswith("/release.zip")
+    assert rel.version == "0.3.0" and rel.notes == "Modern dark UI and cross-platform builds"
+    assert rel.url.endswith("/release.zip")
     with pytest.raises(UpdateError):
         updater.latest_app_release("me/does-not-exist", api_base=base)       # 404: no such repo/release
     with pytest.raises(UpdateError):
@@ -88,6 +91,16 @@ def test_latest_release_lookup(fake_github):
     state["release"] = {"tag_name": "nightly", "assets": []}
     with pytest.raises(UpdateError):
         updater.latest_app_release("me/tunegrab", api_base=base)             # tag without a version
+
+
+def test_release_lookup_ignores_binary_archives(fake_github):
+    base, state = fake_github
+    state["release"]["assets"] = [
+        {"name": "Tunegrab-windows-x86_64.zip", "browser_download_url": f"{base}/release.zip"},
+    ]
+    state["release"]["zipball_url"] = f"{base}/release.zip"
+    rel = updater.latest_app_release("me/tunegrab", api_base=base)
+    assert rel.url == state["release"]["zipball_url"]
 
 
 def test_download_respects_size_cap(fake_github, tmp_path):
@@ -177,6 +190,13 @@ def test_pip_failure_stops_update(monkeypatch):
     checks = Checks([Status("yt-dlp", "1", "2")])
     with pytest.raises(UpdateError, match="pip"):
         updater.run_update(checks, lambda s: None)
+
+
+def test_managed_install_must_be_updated_by_its_package(monkeypatch):
+    monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
+    assert updater.is_managed_install()
+    with pytest.raises(UpdateError, match="managed app"):
+        updater.run_update(Checks([Status("yt-dlp", "1", "2")]), lambda s: None)
 
 
 def test_real_pypi_and_pip():

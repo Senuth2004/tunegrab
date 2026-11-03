@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+- Added a consistent modern dark theme across Linux and Windows.
+- Added standalone Linux and Windows release builds.
+- Packaged apps now direct users to install updates through new releases.
+
 ## 0.2.0
 - New **Update** tab: updates yt-dlp and mutagen from PyPI, and Tunegrab itself from a GitHub release.
 - Self-update is HTTPS-only, checks zip paths and sizes, keeps a `.backup/`, and refuses to overwrite a git clone.
