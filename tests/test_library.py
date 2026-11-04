@@ -31,3 +31,15 @@ def test_redownload_overwrites_blocked(tmp_path):
     lib.block(key)
     lib.add_downloaded(key, "A", "", "/a2", "")  # user forced a re-download
     assert lib.get(key).status == DOWNLOADED and lib.get(key).path == "/a2"
+
+
+def test_export_strips_video_marker_and_dedupes(tmp_path):
+    from tunegrab.library import Library
+    lib = Library(tmp_path / "l.db")
+    lib.add_downloaded("youtube a", "A", "", "/a.m4a", "")
+    lib.add_downloaded("youtube a video", "A", "", "/a.mp4", "")
+    lib.add_downloaded("instagram b video", "B", "", "/b.mp4", "")
+    out = tmp_path / "archive.txt"
+    assert lib.export_archive(out) == 2
+    assert out.read_text().splitlines() == ["youtube a", "instagram b"]
+    lib.close()

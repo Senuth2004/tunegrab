@@ -1,4 +1,4 @@
-"""Tunegrab - a small Qt/KDE front end for yt-dlp: songs and playlists, cover art, archive."""
+"""Tunegrab - a small Qt/KDE front end for yt-dlp: audio and video, playlists, cover art, archive."""
 from __future__ import annotations
 
 import os
@@ -17,14 +17,22 @@ from PySide6.QtWidgets import (
 )
 from yt_dlp.utils import DownloadCancelled, sanitize_filename
 
-from . import __version__, updater
+from . import __version__, recommend, updater
 from .downloader import (
-    DEFAULT_FORMAT, FORMATS, Entry, Result, download_entry, fetch_info, ffmpeg_location,
+    AUDIO, AUDIO_FORMATS, COOKIE_BROWSERS, DEFAULT_FORMAT, FORMATS, VIDEO, VIDEO_FORMATS, Entry,
+    Result, download_entry, fetch_info, ffmpeg_location, format_kind, library_key,
 )
 from .library import BLOCKED, DOWNLOADED, Library
 from .theme import apply_theme
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
+NO_COOKIES = "None (public posts only)"
+LOGIN_HINTS = ("login", "log in", "cookies", "rate-limit", "rate limit", "private", "checkpoint")
+
+
+def needs_login(msg: str) -> bool:
+    low = msg.lower()
+    return any(h in low for h in LOGIN_HINTS)
 
 
 def app_icon() -> QIcon:
@@ -58,13 +66,13 @@ class FetchWorker(QThread):
     done = Signal(list, object)  # entries, playlist title or None
     failed = Signal(str)
 
-    def __init__(self, url: str, song_only: bool):
+    def __init__(self, url: str, song_only: bool, cookies_browser: str = ""):
         super().__init__()
-        self.url, self.song_only = url, song_only
+        self.url, self.song_only, self.cookies_browser = url, song_only, cookies_browser
 
     def run(self) -> None:
         try:
-            entries, title = fetch_info(self.url, self.song_only)
+            entries, title = fetch_info(self.url, self.song_only, self.cookies_browser)
         except Exception as exc:  # network, unsupported link, ...
             self.failed.emit(str(exc).replace("ERROR: ", ""))
             return
@@ -77,9 +85,11 @@ class DownloadWorker(QThread):
     track_failed = Signal(int, str)  # row, message
     finished_all = Signal(int, int, bool)  # ok, failed, cancelled
 
-    def __init__(self, jobs: list[tuple[int, Entry]], dest: Path, fmt: str, crop: bool):
+    def __init__(self, jobs: list[tuple[int, Entry]], dest: Path, fmt: str, crop: bool,
+                 cookies_browser: str = ""):
         super().__init__()
         self.jobs, self.dest, self.fmt, self.crop = jobs, dest, fmt, crop
+        self.cookies_browser = cookies_browser
         self._cancel = False
 
     def cancel(self) -> None:
@@ -95,6 +105,7 @@ class DownloadWorker(QThread):
                     entry, self.dest, self.fmt, self.crop,
                     lambda pct, txt, r=row: self.progress.emit(r, pct, txt),
                     lambda: self._cancel,
+                    self.cookies_browser,
                 )
             except DownloadCancelled:
                 break
@@ -105,6 +116,29 @@ class DownloadWorker(QThread):
             ok += 1
             self.track_done.emit(row, res)
         self.finished_all.emit(ok, failed, self._cancel)
+
+
+class SuggestWorker(QThread):
+    progress = Signal(int, int)  # seeds done, seeds total
+    done = Signal(list)  # list[recommend.Suggestion]
+    failed = Signal(str)
+
+    def __init__(self, tracks: list):
+        super().__init__()
+        self.tracks = tracks
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            found = recommend.suggest(self.tracks, on_progress=self.progress.emit,
+                                      should_cancel=lambda: self._cancel)
+        except Exception as exc:  # network, bad key, empty library: show it, never crash
+            self.failed.emit(str(exc))
+            return
+        self.done.emit(found)
 
 
 class CheckWorker(QThread):
@@ -168,10 +202,18 @@ class MainWindow(QMainWindow):
         self.checker: Optional[CheckWorker] = None
         self.updater_thread: Optional[UpdateWorker] = None
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_download_tab(), "Download")
-        self.tabs.addTab(self._build_library_tab(), "Library")
-        self.tabs.addTab(self._build_update_tab(), "Update")
-        self.tabs.currentChanged.connect(lambda i: self.refresh_library() if i == 1 else None)
+        self.suggester: Optional[SuggestWorker] = None
+        self.suggestions: list[recommend.Suggestion] = []
+        self.download_tab = self._build_download_tab()
+        self.discover_tab = self._build_discover_tab()
+        self.library_tab = self._build_library_tab()
+        self.update_tab = self._build_update_tab()
+        self.tabs.addTab(self.download_tab, "Download")
+        self.tabs.addTab(self.discover_tab, "Discover")
+        self.tabs.addTab(self.library_tab, "Library")
+        self.tabs.addTab(self.update_tab, "Update")
+        self.tabs.currentChanged.connect(
+            lambda i: self.refresh_library() if self.tabs.widget(i) is self.library_tab else None)
         self.setCentralWidget(self.tabs)
         self.refresh_library()
         if self.auto_check.isChecked():
@@ -184,7 +226,8 @@ class MainWindow(QMainWindow):
 
         top = QHBoxLayout()
         self.url = QLineEdit()
-        self.url.setPlaceholderText("Paste a song or playlist link, then press Enter")
+        self.url.setPlaceholderText(
+            "Paste a YouTube, Facebook or Instagram link (video, song or playlist), then press Enter")
         self.url.setClearButtonEnabled(True)
         self.url.returnPressed.connect(self.fetch)
         self.fetch_btn = QPushButton("Fetch")
@@ -193,14 +236,14 @@ class MainWindow(QMainWindow):
         top.addWidget(self.fetch_btn)
         v.addLayout(top)
 
-        self.song_only = QCheckBox("Song only (ignore the playlist part of the link)")
+        self.song_only = QCheckBox("Single item only (ignore the playlist part of the link)")
         v.addWidget(self.song_only)
 
         self.summary = QLabel("")
         v.addWidget(self.summary)
 
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Track", "Uploader", "Status"])
+        self.table.setHorizontalHeaderLabels(["Title", "Uploader", "Status"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -223,19 +266,45 @@ class MainWindow(QMainWindow):
         opts = QHBoxLayout()
         opts.addWidget(QLabel("Format:"))
         self.format = QComboBox()
-        self.format.addItems(list(FORMATS))
+        self.format.addItems(list(AUDIO_FORMATS))
+        self.format.insertSeparator(self.format.count())
+        self.format.addItems(list(VIDEO_FORMATS))
         saved = self.settings.value("format", DEFAULT_FORMAT)
         self.format.setCurrentText(saved if saved in FORMATS else DEFAULT_FORMAT)
         opts.addWidget(self.format)
         opts.addSpacing(12)
         opts.addWidget(QLabel("Save to:"))
         music = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
-        self.folder = QLineEdit(self.settings.value("folder", str(Path(music) / "Tunegrab")))
+        videos = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MoviesLocation)
+        # Audio and video each remember their own folder.
+        self._folders = {
+            AUDIO: self.settings.value("folder", str(Path(music) / "Tunegrab")),
+            VIDEO: self.settings.value("video_folder", str(Path(videos) / "Tunegrab")),
+        }
+        self._kind = format_kind(self.format.currentText())
+        self.folder = QLineEdit(self._folders[self._kind])
         opts.addWidget(self.folder, 1)
         browse = QPushButton("Browse...")
         browse.clicked.connect(self.browse)
         opts.addWidget(browse)
         v.addLayout(opts)
+
+        login = QHBoxLayout()
+        login.addWidget(QLabel("Sign-in cookies from:"))
+        self.cookies = QComboBox()
+        self.cookies.addItem(NO_COOKIES, "")
+        for name in COOKIE_BROWSERS:
+            self.cookies.addItem(name.capitalize(), name)
+        saved_browser = self.settings.value("cookies_browser", "") or ""
+        self.cookies.setCurrentIndex(max(0, self.cookies.findData(saved_browser)))
+        self.cookies.setToolTip(
+            "Instagram and Facebook often only show videos to signed-in users. Pick the browser "
+            "you are signed in with; Tunegrab reads its cookies locally and never stores them.")
+        self.cookies.currentIndexChanged.connect(
+            lambda _: self.settings.setValue("cookies_browser", self.cookies_browser()))
+        login.addWidget(self.cookies)
+        login.addStretch(1)
+        v.addLayout(login)
 
         checks = QHBoxLayout()
         self.use_archive = QCheckBox("Skip tracks already in the archive")
@@ -248,6 +317,8 @@ class MainWindow(QMainWindow):
             checks.addWidget(c)
         checks.addStretch(1)
         v.addLayout(checks)
+        self.crop.setEnabled(self._kind == AUDIO)
+        self.format.currentTextChanged.connect(self._format_changed)
 
         run = QHBoxLayout()
         self.download_btn = QPushButton("Download selected")
@@ -267,20 +338,38 @@ class MainWindow(QMainWindow):
         v.addWidget(self.status)
         return w
 
+    def cookies_browser(self) -> str:
+        return self.cookies.currentData() or ""
+
+    def _key(self, entry: Entry) -> str:
+        return library_key(entry.key, self._kind)
+
+    def _format_changed(self, label: str) -> None:
+        kind = format_kind(label)
+        if kind == self._kind:
+            return
+        self._folders[self._kind] = self.folder.text()
+        self._kind = kind
+        self.folder.setText(self._folders[kind])
+        self.crop.setEnabled(kind == AUDIO)  # square cover art only applies to audio
+        if self.entries and not self._download_active:
+            self._fetched(self.entries, self.playlist_title)  # archive status differs per kind
+
     def browse(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Choose music folder", self.folder.text())
+        title = "Choose video folder" if self._kind == VIDEO else "Choose music folder"
+        d = QFileDialog.getExistingDirectory(self, title, self.folder.text())
         if d:
             self.folder.setText(d)
 
     def _set_checks(self, want) -> None:
         for row, entry in enumerate(self.entries):
-            t = self.lib.get(entry.key)
+            t = self.lib.get(self._key(entry))
             state = t.status if t else None
             self.table.item(row, 0).setCheckState(
                 Qt.CheckState.Checked if want(state) else Qt.CheckState.Unchecked)
 
     def _status_text(self, entry: Entry) -> tuple[str, Optional[str]]:
-        t = self.lib.get(entry.key)
+        t = self.lib.get(self._key(entry))
         if t is None:
             return "New", None
         if t.status == BLOCKED:
@@ -302,7 +391,7 @@ class MainWindow(QMainWindow):
         self._update_download_button()
         self.fetch_btn.setEnabled(False)
         self.summary.setText("Looking up the link...")
-        self.fetcher = FetchWorker(url, self.song_only.isChecked())
+        self.fetcher = FetchWorker(url, self.song_only.isChecked(), cookies_browser=self.cookies_browser())
         self.fetcher.done.connect(self._fetched)
         self.fetcher.failed.connect(self._fetch_failed)
         self.fetcher.finished.connect(self._fetch_finished)
@@ -321,6 +410,11 @@ class MainWindow(QMainWindow):
                 "Tunegrab could not verify the site's security certificate. Check your system "
                 "date and make sure your system CA certificates are up to date."
             )
+        elif needs_login(msg):
+            box.setText(
+                "The site wants you to be signed in. Sign in with your browser, choose that browser "
+                "under \"Sign-in cookies from\", and fetch again. Private posts only work for accounts "
+                "that can see them.")
         else:
             box.setText("Tunegrab could not load this link. Check the link and your network connection.")
         box.setDetailedText(msg)
@@ -341,8 +435,8 @@ class MainWindow(QMainWindow):
             self.table.setItem(row, 0, item)
             self.table.setItem(row, 1, QTableWidgetItem(e.uploader))
             self.table.setItem(row, 2, QTableWidgetItem(text))
-        kind = f"Playlist: {title}" if title else "Single song"
-        self.summary.setText(f"{kind} - {len(entries)} track(s), {known} already known.")
+        kind = f"Playlist: {title}" if title else ("Single video" if self._kind == VIDEO else "Single song")
+        self.summary.setText(f"{kind} - {len(entries)} item(s), {known} already known.")
         self.bar.setValue(0)
         self.status.setText("")
         self._update_download_button()
@@ -379,7 +473,7 @@ class MainWindow(QMainWindow):
                 install_hint = "Linux: install ffmpeg with your distribution's package manager."
             QMessageBox.warning(
                 self, "ffmpeg is missing",
-                "FFmpeg is needed to convert audio and embed cover art.\n\n"
+                "FFmpeg is needed to convert audio, merge video and embed cover art.\n\n"
                 f"{install_hint}\n"
                 "On Fedora, install ffmpeg-free; MP3 may require the full FFmpeg from RPM Fusion.")
             return
@@ -391,12 +485,15 @@ class MainWindow(QMainWindow):
         dest = Path(self.folder.text()).expanduser()
         if self.playlist_title and self.own_folder.isChecked():
             dest = dest / sanitize_filename(self.playlist_title)
-        for key, val in (("format", self.format.currentText()), ("folder", self.folder.text()),
+        self._folders[self._kind] = self.folder.text()
+        for key, val in (("format", self.format.currentText()), ("folder", self._folders[AUDIO]),
+                         ("video_folder", self._folders[VIDEO]),
                          ("archive", self.use_archive.isChecked()),
                          ("own_folder", self.own_folder.isChecked()),
                          ("crop", self.crop.isChecked())):
             self.settings.setValue(key, val)
-        self.worker = DownloadWorker(jobs, dest, self.format.currentText(), self.crop.isChecked())
+        self.worker = DownloadWorker(jobs, dest, self.format.currentText(),
+                                     self.crop.isChecked() and self._kind == AUDIO, self.cookies_browser())
         self._jobs_total, self._jobs_done = len(jobs), 0
         self.worker.progress.connect(self._progress)
         self.worker.track_done.connect(self._track_done)
@@ -420,7 +517,7 @@ class MainWindow(QMainWindow):
         self._set_status(row, f"{text} {pct:.0f}%" if text == "Downloading" else text)
         self.table.scrollToItem(self.table.item(row, 0))
         self.bar.setValue(int((self._jobs_done + pct / 100) / self._jobs_total * 100))
-        self.status.setText(f"Track {self._jobs_done + 1} of {self._jobs_total}")
+        self.status.setText(f"Item {self._jobs_done + 1} of {self._jobs_total}")
 
     def _track_done(self, row: int, res: Result) -> None:
         self._jobs_done += 1
@@ -434,7 +531,8 @@ class MainWindow(QMainWindow):
         self._jobs_done += 1
         self._set_status(row, "Failed")
         self.table.item(row, 2).setToolTip(msg)
-        self.status.setText(f"Failed: {msg}")
+        hint = " (try choosing a browser under \"Sign-in cookies from\")" if needs_login(msg) else ""
+        self.status.setText(f"Failed: {msg}{hint}")
 
     def _all_done(self, ok: int, failed: int, cancelled: bool) -> None:
         self.download_btn.setEnabled(True)
@@ -448,6 +546,99 @@ class MainWindow(QMainWindow):
         self.refresh_library()
         if ok or failed:
             notify("Tunegrab", msg)
+
+    # ------------------------------------------------------------------ discover tab
+    def _build_discover_tab(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        top = QHBoxLayout()
+        intro = QLabel(
+            "Suggestions come from YouTube's Mixes for the songs you downloaded most recently. "
+            "Songs you already have, or deleted, are left out.")
+        intro.setWordWrap(True)
+        top.addWidget(intro, 1)
+        self.suggest_btn = QPushButton("Suggest music")
+        self.suggest_btn.clicked.connect(self.suggest_music)
+        top.addWidget(self.suggest_btn)
+        v.addLayout(top)
+
+        self.sugg_table = QTableWidget(0, 3)
+        self.sugg_table.setHorizontalHeaderLabels(["Song", "Channel", "Because you have"])
+        self.sugg_table.verticalHeader().setVisible(False)
+        self.sugg_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.sugg_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        hh = self.sugg_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.sugg_table.itemChanged.connect(lambda _: self._update_send_button())
+        v.addWidget(self.sugg_table, 1)
+
+        row = QHBoxLayout()
+        self.send_btn = QPushButton("Add selected to Download tab")
+        self.send_btn.setEnabled(False)
+        self.send_btn.clicked.connect(self.send_suggestions)
+        row.addWidget(self.send_btn)
+        row.addStretch(1)
+        v.addLayout(row)
+        self.sugg_status = QLabel("")
+        self.sugg_status.setWordWrap(True)
+        v.addWidget(self.sugg_status)
+        return w
+
+    def suggest_music(self) -> None:
+        if self.suggester is not None and self.suggester.isRunning():
+            return
+        self.suggest_btn.setEnabled(False)
+        self.sugg_status.setText("Reading YouTube Mixes for your songs...")
+        self.suggester = SuggestWorker(self.lib.all())
+        self.suggester.progress.connect(
+            lambda n, total: self.sugg_status.setText(f"Looking at your songs: {n} of {total}..."))
+        self.suggester.done.connect(self._suggested)
+        self.suggester.failed.connect(self._suggest_failed)
+        self.suggester.finished.connect(lambda: self.suggest_btn.setEnabled(True))
+        self.suggester.start()
+
+    def _suggest_failed(self, msg: str) -> None:
+        self.sugg_status.setText(msg)
+
+    def _suggested(self, found: list) -> None:
+        self.suggestions = found
+        self.sugg_table.blockSignals(True)
+        self.sugg_table.setRowCount(len(found))
+        for row, s in enumerate(found):
+            item = QTableWidgetItem(s.title)
+            item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
+                          | Qt.ItemFlag.ItemIsSelectable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.sugg_table.setItem(row, 0, item)
+            self.sugg_table.setItem(row, 1, QTableWidgetItem(s.uploader))
+            because = ", ".join(s.because[:2]) + (f" +{len(s.because) - 2} more" if len(s.because) > 2 else "")
+            self.sugg_table.setItem(row, 2, QTableWidgetItem(because))
+        self.sugg_table.blockSignals(False)
+        self._update_send_button()
+        self.sugg_status.setText(
+            f"{len(found)} suggestion(s). Tick the ones you like and add them to the Download tab."
+            if found else "No new suggestions yet: everything YouTube suggested is already in your library.")
+
+    def _checked_suggestions(self) -> list:
+        return [s for r, s in enumerate(self.suggestions)
+                if self.sugg_table.item(r, 0).checkState() == Qt.CheckState.Checked]
+
+    def _update_send_button(self) -> None:
+        self.send_btn.setEnabled(bool(self._checked_suggestions()))
+
+    def send_suggestions(self) -> None:
+        picked = self._checked_suggestions()
+        if not picked:
+            return
+        if self._download_active:
+            self.sugg_status.setText("Wait for the current downloads to finish first.")
+            return
+        entries = [Entry(key=s.key, id=s.id, title=s.title, url=s.url, uploader=s.uploader) for s in picked]
+        self._fetched(entries, None)
+        self.summary.setText(f"Suggestions - {len(entries)} song(s).")
+        self.tabs.setCurrentWidget(self.download_tab)
 
     # ------------------------------------------------------------------ update tab
     def _build_update_tab(self) -> QWidget:
@@ -544,7 +735,7 @@ class MainWindow(QMainWindow):
         n = len(outdated)
         self.update_btn.setEnabled(n > 0)
         self.update_btn.setText("Install update" if managed else "Update everything")
-        self.tabs.setTabText(2, f"Update ({n})" if n else "Update")
+        self.tabs.setTabText(self.tabs.indexOf(self.update_tab), f"Update ({n})" if n else "Update")
         self.upd_log.appendPlainText(f"{n} update(s) available." if n else "Everything is up to date.")
         if checks.release and any(s.name == "tunegrab" and s.outdated for s in checks.statuses):
             notes = checks.release.notes.strip()[:600]
@@ -591,7 +782,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Update failed", error)
             self.update_btn.setEnabled(True)
             return
-        self.tabs.setTabText(2, "Update")
+        self.tabs.setTabText(self.tabs.indexOf(self.update_tab), "Update")
         if restart:
             if updater.is_managed_install():
                 self.upd_log.appendPlainText("Update downloaded. Closing to install and relaunch Tunegrab.")
@@ -613,6 +804,9 @@ class MainWindow(QMainWindow):
             return
         if self.checker is not None and self.checker.isRunning():
             self.checker.wait(3000)
+        if self.suggester is not None and self.suggester.isRunning():
+            self.suggester.cancel()
+            self.suggester.wait(3000)
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(8000)
@@ -623,20 +817,20 @@ class MainWindow(QMainWindow):
         w = QWidget()
         v = QVBoxLayout(w)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Filter by title, uploader or playlist")
+        self.search.setPlaceholderText("Filter by title, uploader, playlist or type")
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self._filter_library)
         v.addWidget(self.search)
 
-        self.lib_table = QTableWidget(0, 4)
-        self.lib_table.setHorizontalHeaderLabels(["Title", "Uploader", "Playlist", "Status"])
+        self.lib_table = QTableWidget(0, 5)
+        self.lib_table.setHorizontalHeaderLabels(["Title", "Uploader", "Playlist", "Status", "Type"])
         self.lib_table.verticalHeader().setVisible(False)
         self.lib_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.lib_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.lib_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         hh = self.lib_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in (1, 2, 3):
+        for c in (1, 2, 3, 4):
             hh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         v.addWidget(self.lib_table, 1)
 
@@ -671,12 +865,13 @@ class MainWindow(QMainWindow):
             self.lib_table.setItem(r, 1, QTableWidgetItem(t.uploader))
             self.lib_table.setItem(r, 2, QTableWidgetItem(t.playlist))
             self.lib_table.setItem(r, 3, QTableWidgetItem(self._lib_status(t)))
+            self.lib_table.setItem(r, 4, QTableWidgetItem("Video" if Library.is_video(t.key) else "Audio"))
         self._filter_library()
 
     def _filter_library(self) -> None:
         q = self.search.text().strip().lower()
         for r in range(self.lib_table.rowCount()):
-            text = " ".join(self.lib_table.item(r, c).text() for c in range(3)).lower()
+            text = " ".join(self.lib_table.item(r, c).text() for c in (0, 1, 2, 4)).lower()
             self.lib_table.setRowHidden(r, bool(q) and q not in text)
 
     def _selected_keys(self) -> list[str]:

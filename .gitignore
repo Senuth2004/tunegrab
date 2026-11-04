@@ -9,3 +9,4 @@ __pycache__/
 # created by the in-app updater
 .backup/
 .update-*/
+.sandbox/

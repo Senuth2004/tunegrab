@@ -2,7 +2,8 @@
 
 A track is identified by a key like "youtube dQw4w9WgXcQ" (the same format yt-dlp
 uses in its --download-archive file), so the archive can be exported and reused
-with the yt-dlp command line.
+with the yt-dlp command line. Video downloads get a " video" suffix ("youtube abc video")
+so the audio and the video of the same item are tracked separately.
 
 Two states:
   downloaded  the file exists (or should exist) in the music folder
@@ -53,6 +54,10 @@ class Library:
         return f"{(ie_key or 'generic').lower()} {video_id}"
 
     @staticmethod
+    def is_video(key: str) -> bool:
+        return key.endswith(" video")
+
+    @staticmethod
     def _row(r) -> Track:
         return Track(*r)
 
@@ -90,7 +95,11 @@ class Library:
 
     def export_archive(self, dest: Path) -> int:
         """Write a yt-dlp compatible archive file (downloaded AND blocked tracks)."""
-        keys = [r[0] for r in self.db.execute("SELECT key FROM tracks ORDER BY added")]
+        keys: list[str] = []
+        for (key,) in self.db.execute("SELECT key FROM tracks ORDER BY added"):
+            key = key[: -len(" video")] if self.is_video(key) else key
+            if key not in keys:
+                keys.append(key)
         Path(dest).write_text("".join(k + "\n" for k in keys), encoding="utf-8")
         return len(keys)
 

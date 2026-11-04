@@ -1,7 +1,8 @@
 # Tunegrab
 
-A cross-platform desktop app for **Linux and Windows** that downloads songs and whole playlists as
-audio files with **cover art and tags**, and remembers what you already have. It is built with Qt
+A cross-platform desktop app for **Linux and Windows** that downloads songs, videos and whole
+playlists from **YouTube, Facebook and Instagram**, as audio files with **cover art and tags** or as
+**mp4/mkv videos**, and remembers what you already have. It is built with Qt
 and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with light and dark themes.
 
 <!-- Add a screenshot: save one to docs/screenshot.png and uncomment the next line.
@@ -14,12 +15,20 @@ and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with light and dark themes.
 
 ## Features
 
-- **One song or a whole playlist** from the same box. "Song only" ignores the `&list=` part of a link.
+- **YouTube, Facebook and Instagram:** videos, reels, playlists and multi-video posts.
+- **One item or a whole playlist** from the same box. "Single item only" ignores the `&list=` part of a link.
 - **Pick tracks** with checkboxes: all, none, or only the new ones.
-- **Formats:** m4a (AAC), opus or mp3.
+- **Audio formats:** m4a (AAC), opus or mp3.
+- **Video formats:** mp4 (best, up to 1080p, 720p or 480p) or mkv (best quality, any codec). Video
+  and audio are merged without re-encoding, and the thumbnail and title are embedded. Videos are saved
+  to their own folder (default `~/Videos/Tunegrab`).
+- **Sign-in cookies:** for Instagram and Facebook posts that need you to be signed in, Tunegrab can
+  use the cookies of a browser you are already signed in with.
 - **Light and dark modes:** switch themes from the **View** menu; your choice is remembered.
 - **Cover art is always embedded**, optionally centre-cropped to a square, plus title and artist tags.
 - **Download archive:** every download is recorded, so known tracks are skipped next time.
+- **Discover tab:** music suggestions from YouTube's Mixes for the songs you downloaded, with no
+  account or API key. Songs you already have or deleted are left out.
 - **Library tab** with search. Deleting moves the file to the Trash and you choose:
   *never download again* (the track stays in the archive) or *allow re-download*.
 - **Update tab:** source installs can update yt-dlp and mutagen. Install a newer app release to
@@ -33,7 +42,7 @@ and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with light and dark themes.
 | What | Why |
 |---|---|
 | Python 3.10 or newer | runs from source |
-| FFmpeg | converts audio and embeds cover art. Bundled with Windows ready-to-run builds. |
+| FFmpeg | converts audio, merges video and embeds cover art. Bundled with Windows ready-to-run builds. |
 | PySide6 (Qt 6) | the window (included in the source-install dependencies) |
 | yt-dlp, mutagen | downloading and cover art in `.opus` files (included in the source-install dependencies) |
 
@@ -128,13 +137,31 @@ Restart your terminal after installing FFmpeg so it is available on `PATH`.
 
 ## Using it
 
-1. Paste a song or playlist link and press **Enter** (or **Fetch**).
-2. Tick the tracks you want. With *Skip tracks already in the archive* on, known tracks start unticked.
-3. Choose the format and the folder (default `~/Music/Tunegrab`). Playlists get their own sub-folder.
+1. Paste a YouTube, Facebook or Instagram link and press **Enter** (or **Fetch**).
+2. Tick the items you want. With *Skip tracks already in the archive* on, known items start unticked.
+   Audio and video downloads are tracked separately, so having the song does not skip the video.
+3. Choose an audio or video format and the folder (default `~/Music/Tunegrab` for audio,
+   `~/Videos/Tunegrab` for video). Playlists get their own sub-folder.
 4. Press **Download selected**. A desktop notification appears when it is done (needs `notify-send`, which most KDE installs have).
+
+If Instagram or Facebook says you must log in, sign in with your browser, choose that browser under
+**Sign-in cookies from**, and fetch again. Cookies are read locally by yt-dlp and are not stored by
+Tunegrab. Private posts only work for an account that can see them.
 
 Files are named `Title [id].ext`. The id stops two songs with the same title from overwriting each
 other; change `FILENAME_TEMPLATE` in `tunegrab/downloader.py` if you prefer another pattern.
+
+### Music suggestions (Discover tab)
+
+1. Download a few songs from YouTube first; suggestions start from your most recent YouTube downloads.
+2. Open **Discover** and press **Suggest music**. Tunegrab reads YouTube's Mix (the related-songs
+   radio) for each of those songs. Songs that come early in a Mix, or that several of your songs'
+   Mixes agree on, rank first. Shorts, long compilations, other uploads of songs you already have,
+   and more than three songs from one channel are left out.
+3. Tick the ones you like and press **Add selected to Download tab**, then download as usual with any
+   audio or video format.
+
+No account or API key is needed. Facebook and Instagram downloads are not used as seeds.
 
 ### The archive and deleting songs
 
@@ -206,6 +233,10 @@ sudo dnf swap ffmpeg-free ffmpeg --allowerasing
 
 Or pick m4a or opus, which need no extra codecs.
 
+**Instagram or Facebook: "login required" or "rate-limit reached"** - pick your browser under
+**Sign-in cookies from** (sign in to the site in that browser first). On Chrome-based browsers, close
+the browser if its cookie database is locked. Stories and private posts always need sign-in.
+
 **Downloads suddenly fail** - update yt-dlp in the Update tab (or `.venv/bin/pip install -U yt-dlp`).
 
 **No cover art in `.opus` files** - make sure `mutagen` is installed (it is in `requirements.txt`).
@@ -235,6 +266,7 @@ tunegrab/
   downloader.py   yt-dlp wrapper (no Qt)
   library.py      SQLite library and archive (no Qt)
   updater.py      PyPI and GitHub updates (no Qt)
+  recommend.py    music suggestions from YouTube Mixes (no Qt)
 packaging/        frozen-app entry point
 tests/            pytest suite
 .github/workflows/ builds and tests Linux and Windows releases
@@ -255,7 +287,7 @@ install-launcher.sh   adds a Linux build to the KDE launcher
 Tunegrab only automates what yt-dlp already does. Download only what you are allowed to: your own
 uploads, Creative Commons or royalty-free music, or content a site explicitly lets you download.
 Many sites forbid downloading in their terms, and copyright law differs by country; you are
-responsible for how you use this tool. It is not affiliated with YouTube or any other service.
+responsible for how you use this tool. It is not affiliated with YouTube, Facebook, Instagram or any other service.
 
 ## Credits and licence
 

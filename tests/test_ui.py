@@ -166,7 +166,7 @@ def test_failed_fetch_clears_stale_tracks_and_disables_download(win, monkeypatch
     assert win.download_btn.isEnabled()
 
     class FakeWorker:
-        def __init__(self, url, song_only):
+        def __init__(self, url, song_only, cookies_browser=""):
             self.url = url
             self.song_only = song_only
             self.done = FakeSignal()
@@ -272,10 +272,10 @@ def test_update_tab_shows_status(win):
     assert rows[0][3] == "No update source set"
     assert rows[1] == ["yt-dlp", "2026.1.1", "2026.10.26", "Update available"]
     assert rows[2][3] == "Up to date"
-    assert win.update_btn.isEnabled() and win.tabs.tabText(2) == "Update (1)"
+    assert win.update_btn.isEnabled() and win.tabs.tabText(win.tabs.indexOf(win.update_tab)) == "Update (1)"
 
     win._checks_done(checks(outdated=False))
-    assert not win.update_btn.isEnabled() and win.tabs.tabText(2) == "Update"
+    assert not win.update_btn.isEnabled() and win.tabs.tabText(win.tabs.indexOf(win.update_tab)) == "Update"
 
 
 def test_managed_update_downloads_and_restarts(tmp_path, monkeypatch):
@@ -325,7 +325,7 @@ def test_update_runs_and_offers_restart(win, monkeypatch):
     win.updater_thread.wait()
     QApplication.processEvents()
     assert "updating..." in win.upd_log.toPlainText() and restarted == [True]
-    assert win.tabs.tabText(2) == "Update"
+    assert win.tabs.tabText(win.tabs.indexOf(win.update_tab)) == "Update"
 
 
 def test_update_error_is_shown_not_raised(win, monkeypatch):
@@ -347,3 +347,67 @@ def test_declining_the_update_does_nothing(win, monkeypatch):
     win._checks_done(checks())
     win.run_update()
     assert win.updater_thread is None
+
+
+def test_video_format_uses_separate_folder_status_and_disables_crop(win, tmp_path):
+    win.folder.setText("/music/here")
+    win.lib.add_downloaded("youtube id0", "Song 0", "", str(tmp_path / "x.m4a"), "")
+    win._fetched(entries()[:1], None)
+    assert win.crop.isEnabled()
+
+    win.format.setCurrentText("mp4 video - up to 1080p")
+    assert not win.crop.isEnabled()
+    assert win.folder.text() != "/music/here"              # video has its own folder
+    assert win.table.item(0, 2).text() == "New"            # audio download does not count for video
+    assert "Single video" in win.summary.text()
+
+    win._jobs_total, win._jobs_done = 1, 0
+    win._track_done(0, Result("youtube id0 video", "Song 0", "", str(tmp_path / "x.mp4"), True))
+    win.refresh_library()
+    types = sorted(win.lib_table.item(r, 4).text() for r in range(win.lib_table.rowCount()))
+    assert types == ["Audio", "Video"]
+
+    win.format.setCurrentText(main_mod.DEFAULT_FORMAT)
+    assert win.folder.text() == "/music/here" and win.crop.isEnabled()
+
+
+def test_cookie_browser_choice_is_remembered(win):
+    win.cookies.setCurrentIndex(win.cookies.findData("firefox"))
+    assert win.cookies_browser() == "firefox"
+    assert win.settings.value("cookies_browser") == "firefox"
+
+
+def test_login_errors_explain_cookies(win, monkeypatch):
+    texts = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: texts.append(self.text()))
+    win._fetch_failed("[Instagram] abc: Requested content is not available, rate-limit reached or login required")
+    assert "Sign-in cookies from" in texts[0]
+
+
+def test_discover_tab_sends_picked_suggestions_to_download_tab(win, monkeypatch):
+    from tunegrab.recommend import Suggestion
+    assert win.tabs.tabText(win.tabs.indexOf(win.discover_tab)) == "Discover"
+    win.lib.add_downloaded("youtube z", "Only A", "", "/gone.m4a", "")
+
+    win._suggested([Suggestion("y", "Shared", "Chan", 1.0, ["A", "B", "C"]),
+                    Suggestion("z", "Only A", "Chan2", 0.5, ["A"])])
+    assert win.sugg_table.rowCount() == 2 and win.sugg_table.item(0, 2).text() == "A, B +1 more"
+    assert win.sugg_table.item(0, 1).text() == "Chan"
+    assert not win.send_btn.isEnabled()
+
+    win.sugg_table.item(1, 0).setCheckState(Qt.CheckState.Checked)
+    assert win.send_btn.isEnabled()
+    win.send_btn.click()
+    assert win.tabs.currentWidget() is win.download_tab
+    assert [(e.key, e.url) for e in win.entries] == [("youtube z", "https://www.youtube.com/watch?v=z")]
+    assert win.table.item(0, 2).text() == "In archive (file missing)"   # real keys: archive status works
+
+
+def test_suggest_with_empty_library_explains_why(win, monkeypatch):
+    class InlineWorker(main_mod.SuggestWorker):
+        def start(self):
+            self.run()
+
+    monkeypatch.setattr(main_mod, "SuggestWorker", InlineWorker)
+    win.suggest_music()
+    assert "Download a few songs" in win.sugg_status.text()

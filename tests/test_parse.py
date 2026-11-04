@@ -72,3 +72,67 @@ def test_frozen_windows_uses_bundled_ffmpeg(monkeypatch, tmp_path):
     assert downloader.ffmpeg_location() == str(bundled)
     options = downloader.build_opts(tmp_path / "music", lambda _: None)
     assert options["ffmpeg_location"] == str(bundled)
+
+
+def test_facebook_and_instagram_single_videos():
+    for ie, vid, url in (("Facebook", "1234567890", "https://www.facebook.com/watch/?v=1234567890"),
+                         ("Instagram", "C0dE123", "https://www.instagram.com/reel/C0dE123/")):
+        entries, title = parse_info({"id": vid, "title": "Clip", "extractor_key": ie, "webpage_url": url})
+        assert title is None
+        assert entries[0].key == f"{ie.lower()} {vid}"
+        assert entries[0].url == url and entries[0].index == 0
+
+
+def test_carousel_items_without_own_link_use_playlist_index():
+    post = "https://www.instagram.com/p/AbC123/"
+    info = {"_type": "playlist", "title": "Post by someone", "extractor_key": "Instagram",
+            "webpage_url": post, "entries": [
+                {"id": "v1", "title": "Video 1"},                     # no link of its own
+                None,                                                 # an image, not a video
+                {"id": "v3", "title": "Video 3", "webpage_url": post},  # same link as the post
+            ]}
+    entries, _ = parse_info(info, post)
+    assert [(e.url, e.index) for e in entries] == [(post, 1), (post, 3)]
+    assert entries[0].key == "instagram v1"
+
+
+def test_non_youtube_bare_ids_do_not_become_youtube_links():
+    info = {"_type": "playlist", "title": "Page", "extractor_key": "FacebookPlaylist",
+            "webpage_url": "https://www.facebook.com/somepage/videos", "entries": [
+                {"id": "42", "title": "A", "ie_key": "Facebook", "url": "42"}]}
+    entries, _ = parse_info(info)
+    assert "youtube" not in entries[0].url
+    assert entries[0].url == "https://www.facebook.com/somepage/videos" and entries[0].index == 1
+
+
+def test_cookies_from_browser_are_passed_to_yt_dlp(monkeypatch, tmp_path):
+    import tunegrab.downloader as downloader
+    seen = []
+
+    class FakeYDL:
+        def __init__(self, options):
+            seen.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def extract_info(self, url, download):
+            return {"id": "x", "title": "t", "extractor_key": "Instagram", "webpage_url": url}
+
+    monkeypatch.setattr(downloader, "YoutubeDL", FakeYDL)
+    fetch_info("https://www.instagram.com/reel/x/", cookies_browser="firefox")
+    fetch_info("https://www.instagram.com/reel/x/")
+    assert seen[0]["cookiesfrombrowser"] == ("firefox",)
+    assert "cookiesfrombrowser" not in seen[1]
+    assert downloader.build_opts(tmp_path, lambda _: None, "chrome")["cookiesfrombrowser"] == ("chrome",)
+
+
+def test_video_formats_and_keys():
+    import tunegrab.downloader as downloader
+    assert downloader.format_kind("mp4 video - best quality") == "video"
+    assert downloader.format_kind(downloader.DEFAULT_FORMAT) == "audio"
+    assert downloader.library_key("youtube abc", "video") == "youtube abc video"
+    assert downloader.library_key("youtube abc", "audio") == "youtube abc"

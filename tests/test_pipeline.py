@@ -116,3 +116,82 @@ def test_cancel_stops_download(site, tmp_path, monkeypatch):
     entry = dl.Entry(key="fake abc", id="abc", title="t", url="fake://abc")
     with pytest.raises(yt_dlp.utils.DownloadCancelled):
         dl.download_entry(entry, tmp_path / "o", dl.DEFAULT_FORMAT, True, lambda *a: None, lambda: True)
+
+
+@pytest.fixture()
+def video_site(tmp_path):
+    """Separate video-only and audio-only streams, the way YouTube, Facebook and Instagram serve them."""
+    root = tmp_path / "vsite"
+    root.mkdir()
+    ff("-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2", "-c:v", "mpeg4", "-an",
+       str(root / "video.mp4"))
+    ff("-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "aac", "-vn", str(root / "audio.m4a"))
+    ff("-f", "lavfi", "-i", "testsrc=size=640x360:rate=1", "-frames:v", "1", str(root / "cover.jpg"))
+    ff("-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2", "-f", "lavfi",
+       "-i", "sine=frequency=440:duration=2", "-c:v", "libvpx-vp9", "-c:a", "libopus", "-shortest",
+       str(root / "both.webm"))
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    handler.log_message = lambda *a, **k: None
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+class FakeVideoIE(InfoExtractor):
+    IE_NAME = "fakevideo"
+    _VALID_URL = r"fakevideo://(?P<id>\w+)"
+    base = ""
+    single_file = False
+
+    def _real_extract(self, url):
+        vid = self._match_id(url)
+        if self.single_file:  # one muxed webm, needs remuxing to mp4
+            formats = [{"format_id": "both", "url": f"{self.base}/both.webm", "ext": "webm",
+                        "vcodec": "vp9", "acodec": "opus", "height": 240, "width": 320}]
+        else:
+            formats = [
+                {"format_id": "v", "url": f"{self.base}/video.mp4", "ext": "mp4", "vcodec": "mp4v",
+                 "acodec": "none", "height": 240, "width": 320},
+                {"format_id": "a", "url": f"{self.base}/audio.m4a", "ext": "m4a", "acodec": "aac",
+                 "vcodec": "none"},
+            ]
+        return {"id": vid, "title": "Test Clip", "uploader": "Test Channel", "formats": formats,
+                "thumbnails": [{"id": "0", "url": f"{self.base}/cover.jpg"}]}
+
+
+def _video_ydl(monkeypatch):
+    class TestYDL(yt_dlp.YoutubeDL):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            ie = FakeVideoIE(self)
+            self._ies = {"FakeVideo": ie.__class__, **self._ies}
+            self._ies_instances["FakeVideo"] = ie
+
+    monkeypatch.setattr(dl, "YoutubeDL", TestYDL)
+
+
+@pytest.mark.parametrize("single_file", [False, True])
+@pytest.mark.parametrize("fmt_label,suffix", [
+    ("mp4 video - best quality", ".mp4"),
+    ("mp4 video - up to 720p", ".mp4"),
+    ("mkv video - best quality, any codec", ".mkv"),
+])
+def test_video_download_merges_streams(video_site, tmp_path, monkeypatch, fmt_label, suffix, single_file):
+    FakeVideoIE.base, FakeVideoIE.single_file = video_site, single_file
+    _video_ydl(monkeypatch)
+    entry = dl.Entry(key="fakevideo abc", id="abc", title="Test Clip", url="fakevideo://abc")
+    seen = []
+    res = dl.download_entry(entry, tmp_path / "out", fmt_label, True,
+                            lambda pct, txt: seen.append(txt), lambda: False)
+
+    assert res.path.endswith(suffix), res.path
+    assert res.key == "fakevideo abc video"
+    info = probe(res.path)
+    real_video = [s for s in info["streams"] if s["codec_type"] == "video"
+                  and not s.get("disposition", {}).get("attached_pic")]
+    assert real_video and real_video[0]["height"] == 240
+    assert any(s["codec_type"] == "audio" for s in info["streams"])
+    tags = {k.lower(): v for k, v in info["format"].get("tags", {}).items()}
+    assert tags.get("title") == "Test Clip", tags
+    assert sorted(p.suffix for p in (tmp_path / "out").iterdir()) == [suffix], "temporary files left behind"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+- Added video downloads: mp4 (best, 1080p, 720p, 480p) and mkv, with merged audio, thumbnail and title.
+- Added Facebook and Instagram support for videos, reels and multi-video posts, as audio or video.
+- Added "Sign-in cookies from" to use a signed-in browser for posts that need a login.
+- Video downloads use their own folder and are tracked separately from audio in the library; the
+  Library tab shows the type. Exported `archive.txt` stays yt-dlp compatible.
+- Login errors now explain how to fix them.
+- New **Discover** tab: music suggestions from YouTube's Mixes for your recent downloads, with no
+  account or API key. Songs already in the library (or deleted) are left out.
+
 ## 0.3.4
 - Added automatic in-app updates for packaged Linux and Windows builds.
 - Added safe staging and restart helpers so the running app is replaced only after it exits.

@@ -198,7 +198,7 @@ def test_managed_update_downloads_and_schedules_matching_build(tmp_path, monkeyp
                         lambda work, staged, root, version, pid:
                         scheduled.append((work, staged, root, version, pid)))
     logs = []
-    updater.update_managed_app(updater.AppRelease("0.4.0", "", "https://example.com/release.tar.gz"),
+    updater.update_managed_app(updater.AppRelease("99.0.0", "", "https://example.com/release.tar.gz"),
                                logs.append)
 
     assert len(scheduled) == 1
