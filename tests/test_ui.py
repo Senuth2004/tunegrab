@@ -278,27 +278,31 @@ def test_update_tab_shows_status(win):
     assert not win.update_btn.isEnabled() and win.tabs.tabText(2) == "Update"
 
 
-def test_managed_update_opens_release_page(tmp_path, monkeypatch):
+def test_managed_update_downloads_and_restarts(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(updater.sys, "frozen", True, raising=False)
-    opened = []
-    monkeypatch.setattr(main_mod.QDesktopServices, "openUrl",
-                        lambda url: opened.append(url.toString()) or True)
+    calls = []
+    monkeypatch.setattr(updater, "run_update", lambda c, log: calls.append(c) or log("staging build") or True)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QApplication, "quit", lambda: None)
     app = QApplication.instance() or QApplication([])
     window = MainWindow(Library(tmp_path / "lib.db"))
-    window._checks_done(updater.Checks([
-        updater.Status("tunegrab", "0.3.1", "0.3.2"),
-        updater.Status("yt-dlp", "2026.1", "2026.2"),
-    ]))
+    window._checks_done(updater.Checks(
+        [updater.Status("tunegrab", "0.3.1", "0.3.2"),
+         updater.Status("yt-dlp", "2026.1", "2026.2")],
+        updater.AppRelease("0.3.2", "", "https://example.com/release.zip")))
 
     assert window.update_btn.isEnabled()
-    assert window.update_btn.text() == "Get update"
+    assert window.update_btn.text() == "Install update"
     window.run_update()
+    window.updater_thread.wait()
+    QApplication.processEvents()
 
-    assert opened == ["https://github.com/Senuth2004/tunegrab/releases/latest"]
-    assert window.updater_thread is None
+    assert len(calls) == 1
+    assert "staging build" in window.upd_log.toPlainText()
+    assert "Closing to install" in window.upd_log.toPlainText()
     window.lib.close()
 
 

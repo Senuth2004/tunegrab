@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+- Added automatic in-app updates for packaged Linux and Windows builds.
+- Added safe staging and restart helpers so the running app is replaced only after it exits.
+- The previous app directory is preserved as a backup during packaged updates.
+
 ## 0.3.3
 - Bundled FFmpeg with the Windows release so users do not need to install it separately.
 - Added a persistent Light mode option under the View menu.

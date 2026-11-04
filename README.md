@@ -152,13 +152,18 @@ can use with `yt-dlp --download-archive`.
 
 ## Updating
 
-Open the **Update** tab to check for current yt-dlp, mutagen and Tunegrab releases. The update
-source defaults to `Senuth2004/tunegrab` and can be changed to another GitHub `owner/repository`.
+Open the **Update** tab to check for a newer Tunegrab release. In source installs, the tab also
+checks yt-dlp and mutagen. The update source defaults to `Senuth2004/tunegrab` and can be changed
+to another GitHub `owner/repository`.
 
-- **Check for updates** compares installed components with the newest releases. It also runs when
-  the app starts (you can switch that off).
+- **Check for updates** checks the newest Tunegrab release. It also runs when the app starts (you
+  can switch that off).
 - In a source install, **Update everything** installs outdated Python dependencies and offers to
-  restart. In a packaged install, **Get update** opens the selected project's GitHub release page.
+  restart.
+- In a packaged Linux or Windows install, **Install update** downloads the matching release build,
+  closes Tunegrab, replaces the app, and relaunches it. The previous app folder is kept as a backup.
+  The install folder must be writable by your user. This updater is not for Flatpak or system package
+  manager installs.
 
 What gets updated, and from where:
 
@@ -172,11 +177,14 @@ yt-dlp is the one to keep current. Sites change often and downloads stop working
 updated, so if downloads suddenly fail, update first.
 
 **Safety of dependency updates:** pip is run in the source installation's Python environment.
-Packaged apps do not overwrite their installed files; use **Get update** to download a newer build.
+Packaged apps download the platform-specific archive over HTTPS and validate its paths before
+installing it. Only the Tunegrab release is updated; system components such as ffmpeg and PySide6
+remain under your system package manager.
 
 **Running from a git clone?** The in-app updater refuses to overwrite a clone. Update it with
-`git pull` and restart. Packaged builds cannot update themselves; install a newer build to update
-the app and its bundled Python dependencies.
+`git pull` and restart. Packaged builds update Tunegrab and its bundled Python dependencies together.
+To enable in-app updating, users of an older packaged release must install the first release with
+the automatic updater manually; later releases can be applied from the Update tab.
 
 ## Troubleshooting
 

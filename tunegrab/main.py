@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(lambda i: self.refresh_library() if i == 1 else None)
         self.setCentralWidget(self.tabs)
         self.refresh_library()
-        if self.auto_check.isChecked() and not updater.is_managed_install():
+        if self.auto_check.isChecked():
             QTimer.singleShot(1500, self.check_updates)
 
     # ------------------------------------------------------------------ download tab
@@ -480,7 +480,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.check_btn = QPushButton("Check for updates")
         self.check_btn.clicked.connect(self.check_updates)
-        self.update_btn = QPushButton("Get update")
+        self.update_btn = QPushButton("Install update" if updater.is_managed_install() else "Update everything")
         self.update_btn.setEnabled(False)
         self.update_btn.clicked.connect(self.run_update)
         row.addWidget(self.check_btn)
@@ -489,9 +489,9 @@ class MainWindow(QMainWindow):
         v.addLayout(row)
 
         if updater.is_managed_install():
-            note_text = ("Check for updates to see whether a newer Tunegrab release is available. "
-                         "Get update opens the release downloads; packaged apps cannot replace their "
-                         "own files. ffmpeg is installed separately using your system package manager.")
+            note_text = ("Install update downloads the matching build and applies it after Tunegrab closes, "
+                         "then relaunches the new version. Your previous app folder is kept as a backup. "
+                         "ffmpeg is installed separately using your system package manager.")
         else:
             note_text = ("yt-dlp and mutagen come from PyPI. Tunegrab itself comes from the latest GitHub "
                          "release of the source above. ffmpeg and PySide6 belong to your system; update "
@@ -539,36 +539,26 @@ class MainWindow(QMainWindow):
             for c, text in enumerate((st.name, st.installed or "-", st.latest or "-",
                                       self._upd_status_text(st))):
                 self.upd_table.setItem(r, c, QTableWidgetItem(text))
-        n = len(checks.outdated)
         managed = updater.is_managed_install()
+        outdated = [s for s in checks.outdated if not managed or s.name == "tunegrab"]
+        n = len(outdated)
         self.update_btn.setEnabled(n > 0)
-        self.update_btn.setText("Get update" if managed else "Update everything")
+        self.update_btn.setText("Install update" if managed else "Update everything")
         self.tabs.setTabText(2, f"Update ({n})" if n else "Update")
-        if managed and n:
-            self.upd_log.appendPlainText(
-                f"{n} update(s) available. Install a newer Tunegrab build to update bundled components.")
-        else:
-            self.upd_log.appendPlainText(f"{n} update(s) available." if n else "Everything is up to date.")
+        self.upd_log.appendPlainText(f"{n} update(s) available." if n else "Everything is up to date.")
         if checks.release and any(s.name == "tunegrab" and s.outdated for s in checks.statuses):
             notes = checks.release.notes.strip()[:600]
             self.upd_log.appendPlainText(f"Tunegrab {checks.release.version}:\n{notes}" if notes
                                          else f"Tunegrab {checks.release.version} is available.")
 
     def run_update(self) -> None:
-        if self.checks is None or not self.checks.outdated:
+        managed = updater.is_managed_install()
+        if self.checks is None:
             return
-        if updater.is_managed_install():
-            repo = self.repo_edit.text().strip()
-            if not updater.REPO_RE.fullmatch(repo):
-                QMessageBox.warning(self, "Invalid update source",
-                                    "Enter a GitHub source in owner/repository format.")
-                return
-            url = QUrl(f"https://github.com/{repo}/releases/latest")
-            if QDesktopServices.openUrl(url):
-                self.upd_log.appendPlainText(f"Opened the Tunegrab release downloads: {url.toString()}")
-            else:
-                QMessageBox.warning(self, "Could not open release page",
-                                    "Open this address in your browser:\n" + url.toString())
+        outdated = self.checks.outdated
+        if managed:
+            outdated = [s for s in outdated if s.name == "tunegrab"]
+        if not outdated:
             return
         if self.updater_thread is not None and self.updater_thread.isRunning():
             return
@@ -576,10 +566,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Downloads running",
                                     "Finish or cancel the current downloads before updating.")
             return
-        names = ", ".join(s.name for s in self.checks.outdated)
-        extra = ("\n\nTunegrab itself will be downloaded from "
-                 f"github.com/{self.repo_edit.text().strip()} (HTTPS). The old version is kept in .backup/."
-                 if any(s.name == "tunegrab" for s in self.checks.outdated) else "")
+        names = ", ".join(s.name for s in outdated)
+        if managed:
+            extra = ("\n\nThe matching Tunegrab build will be downloaded from "
+                     f"github.com/{self.repo_edit.text().strip()} over HTTPS. Tunegrab will close, "
+                     "install the update, and relaunch; the previous app folder is kept as a backup.")
+        else:
+            extra = ("\n\nTunegrab itself will be downloaded from "
+                     f"github.com/{self.repo_edit.text().strip()} (HTTPS). The old version is kept in .backup/."
+                     if any(s.name == "tunegrab" for s in outdated) else "")
         if QMessageBox.question(self, "Update", f"Update {names}?{extra}") != QMessageBox.StandardButton.Yes:
             return
         self.update_btn.setEnabled(False)
@@ -598,10 +593,16 @@ class MainWindow(QMainWindow):
             return
         self.tabs.setTabText(2, "Update")
         if restart:
-            self.upd_log.appendPlainText("Update finished.")
-            if QMessageBox.question(self, "Update finished", "Restart Tunegrab now to use the new version?"
-                                    ) == QMessageBox.StandardButton.Yes:
-                restart_app()
+            if updater.is_managed_install():
+                self.upd_log.appendPlainText("Update downloaded. Closing to install and relaunch Tunegrab.")
+                if self.updater_thread is not None:
+                    self.updater_thread.wait(5000)
+                QApplication.quit()
+            else:
+                self.upd_log.appendPlainText("Update finished.")
+                if QMessageBox.question(self, "Update finished", "Restart Tunegrab now to use the new version?"
+                                        ) == QMessageBox.StandardButton.Yes:
+                    restart_app()
         else:
             self.upd_log.appendPlainText("Nothing to update.")
 
