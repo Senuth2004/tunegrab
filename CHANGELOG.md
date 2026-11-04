@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+- Bundled FFmpeg with the Windows release so users do not need to install it separately.
+- Added a persistent Light mode option under the View menu.
+
 ## 0.3.2
 - Enabled update-source editing and update checks in packaged builds; release updates now open the download page.
 - Added a Tunegrab application icon for the window and KDE launcher.

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QFile, QSettings, QStandardPaths, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 from yt_dlp.utils import DownloadCancelled, sanitize_filename
 
 from . import __version__, updater
-from .downloader import DEFAULT_FORMAT, FORMATS, Entry, Result, download_entry, fetch_info
+from .downloader import (
+    DEFAULT_FORMAT, FORMATS, Entry, Result, download_entry, fetch_info, ffmpeg_location,
+)
 from .library import BLOCKED, DOWNLOADED, Library
 from .theme import apply_theme
 
@@ -148,6 +150,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.lib = lib
         self.settings = QSettings("tunegrab", "tunegrab")
+        self.light_mode_action = QAction("Light mode", self)
+        self.light_mode_action.setCheckable(True)
+        self.light_mode_action.setChecked(self.settings.value("theme", "dark") == "light")
+        self.light_mode_action.toggled.connect(self._set_light_mode)
+        self.menuBar().addMenu("View").addAction(self.light_mode_action)
         self.entries: list[Entry] = []
         self.playlist_title: Optional[str] = None
         self.fetcher: Optional[FetchWorker] = None
@@ -360,16 +367,19 @@ class MainWindow(QMainWindow):
     def start_download(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
-        if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        if not ffmpeg_location():
             if sys.platform == "win32":
-                install_hint = "Windows: install FFmpeg (for example, winget install Gyan.FFmpeg.Shared)."
+                if updater.is_managed_install():
+                    install_hint = "The built-in FFmpeg is missing; reinstall Tunegrab."
+                else:
+                    install_hint = "Windows: install FFmpeg and add ffmpeg.exe to PATH."
             elif sys.platform == "darwin":
                 install_hint = "macOS: install FFmpeg with  brew install ffmpeg."
             else:
-                install_hint = "Linux: install ffmpeg and ffprobe with your distribution's package manager."
+                install_hint = "Linux: install ffmpeg with your distribution's package manager."
             QMessageBox.warning(
                 self, "ffmpeg is missing",
-                "ffmpeg and ffprobe are needed to convert audio and embed cover art.\n\n"
+                "FFmpeg is needed to convert audio and embed cover art.\n\n"
                 f"{install_hint}\n"
                 "On Fedora, install ffmpeg-free; MP3 may require the full FFmpeg from RPM Fusion.")
             return
@@ -493,6 +503,12 @@ class MainWindow(QMainWindow):
         self.upd_log.setReadOnly(True)
         v.addWidget(self.upd_log, 1)
         return w
+
+    def _set_light_mode(self, enabled: bool) -> None:
+        self.settings.setValue("theme", "light" if enabled else "dark")
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, "light" if enabled else "dark")
 
     def _upd_status_text(self, st: updater.Status) -> str:
         if st.error:
@@ -710,9 +726,10 @@ class MainWindow(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
-    apply_theme(app)
     app.setApplicationName("tunegrab")
     app.setDesktopFileName("tunegrab")
+    settings = QSettings("tunegrab", "tunegrab")
+    apply_theme(app, settings.value("theme", "dark"))
     data = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation))
     lib = Library(data / "library.db")
     win = MainWindow(lib)

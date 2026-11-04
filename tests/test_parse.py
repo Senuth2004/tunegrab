@@ -57,3 +57,18 @@ def test_fetch_info_uses_system_certificate_store(monkeypatch):
 
     assert entries[0].id == "abc"
     assert seen[0]["compat_opts"] == ["no-certifi"]
+
+
+def test_frozen_windows_uses_bundled_ffmpeg(monkeypatch, tmp_path):
+    import tunegrab.downloader as downloader
+
+    bundled = tmp_path / "ffmpeg-win-x86_64.exe"
+    bundled.write_bytes(b"test executable")
+    monkeypatch.setattr(downloader.sys, "platform", "win32")
+    monkeypatch.setattr(downloader.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(downloader.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(downloader.shutil, "which", lambda name: None)
+
+    assert downloader.ffmpeg_location() == str(bundled)
+    options = downloader.build_opts(tmp_path / "music", lambda _: None)
+    assert options["ffmpeg_location"] == str(bundled)

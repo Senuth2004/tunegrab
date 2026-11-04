@@ -13,7 +13,7 @@ from tunegrab import updater
 from tunegrab.downloader import Entry, Result
 from tunegrab.library import BLOCKED, Library
 from tunegrab.main import MainWindow, app_icon
-from tunegrab.theme import STYLESHEET, apply_theme
+from tunegrab.theme import LIGHT_STYLESHEET, STYLESHEET, apply_theme
 
 
 @pytest.fixture()
@@ -40,6 +40,17 @@ def test_dark_theme_uses_fusion_and_dark_surfaces():
     apply_theme(app)
     assert app.palette().color(QPalette.ColorRole.Window).name() == "#15181e"
     assert "#111318" in STYLESHEET and "#8b7cff" in STYLESHEET
+
+
+def test_light_mode_action_applies_and_persists(win):
+    win.light_mode_action.setChecked(True)
+    assert win.settings.value("theme") == "light"
+    assert QApplication.instance().palette().color(QPalette.ColorRole.Window).name() == "#f4f5f8"
+    assert QApplication.instance().styleSheet() == LIGHT_STYLESHEET
+
+    win.light_mode_action.setChecked(False)
+    assert win.settings.value("theme") == "dark"
+    assert QApplication.instance().palette().color(QPalette.ColorRole.Window).name() == "#15181e"
 
 
 def test_application_icon_is_available():

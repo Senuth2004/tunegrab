@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -25,6 +27,15 @@ FILENAME_TEMPLATE = "%(title)s [%(id)s].%(ext)s"
 
 # Centre-crop to a square (players show cover art as a square).
 SQUARE_CROP = ["-vf", "crop='min(iw,ih)':'min(iw,ih)'", "-frames:v", "1", "-q:v", "2"]
+
+
+def ffmpeg_location() -> Optional[str]:
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
+        root = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+        bundled = sorted(root.glob("ffmpeg*.exe"))
+        if bundled:
+            return str(bundled[0])
+    return shutil.which("ffmpeg")
 
 
 class SquareCoverPP(FFmpegPostProcessor):
@@ -117,7 +128,7 @@ def fetch_info(url: str, song_only: bool = False) -> tuple[list[Entry], Optional
 
 
 def build_opts(dest: Path, hook: Callable[[dict], None]) -> dict:
-    return {
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
@@ -130,6 +141,10 @@ def build_opts(dest: Path, hook: Callable[[dict], None]) -> dict:
         ],
         "progress_hooks": [hook],
     }
+    executable = ffmpeg_location()
+    if executable:
+        opts["ffmpeg_location"] = executable
+    return opts
 
 
 def attach_postprocessors(ydl: YoutubeDL, codec: str, crop_square: bool) -> None:

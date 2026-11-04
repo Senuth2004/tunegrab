@@ -61,7 +61,14 @@ jobs:
           tar -czf Tunegrab-linux-x86_64.tar.gz -C dist Tunegrab
       - name: Package Windows build
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path dist/Tunegrab -DestinationPath Tunegrab-windows-x86_64.zip
+        run: |
+          $ffmpeg = Get-ChildItem dist/Tunegrab -Recurse -Filter "ffmpeg*.exe" | Select-Object -First 1
+          if (-not $ffmpeg) { throw "Bundled FFmpeg executable was not found in the Windows build." }
+          & $ffmpeg.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled FFmpeg executable failed its version check." }
+          & $ffmpeg.FullName -L *> dist/Tunegrab/FFmpeg-LICENSE.txt
+          if ($LASTEXITCODE -ne 0) { throw "Could not read the FFmpeg license information." }
+          Compress-Archive -Path dist/Tunegrab -DestinationPath Tunegrab-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Tunegrab-${{ matrix.platform }}-x86_64

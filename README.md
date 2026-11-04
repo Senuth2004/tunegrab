@@ -2,7 +2,7 @@
 
 A cross-platform desktop app for **Linux and Windows** that downloads songs and whole playlists as
 audio files with **cover art and tags**, and remembers what you already have. It is built with Qt
-and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a consistent dark theme on every platform.
+and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with light and dark themes.
 
 <!-- Add a screenshot: save one to docs/screenshot.png and uncomment the next line.
 ![Tunegrab](docs/screenshot.png)
@@ -17,6 +17,7 @@ and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a consistent dark theme on 
 - **One song or a whole playlist** from the same box. "Song only" ignores the `&list=` part of a link.
 - **Pick tracks** with checkboxes: all, none, or only the new ones.
 - **Formats:** m4a (AAC), opus or mp3.
+- **Light and dark modes:** switch themes from the **View** menu; your choice is remembered.
 - **Cover art is always embedded**, optionally centre-cropped to a square, plus title and artist tags.
 - **Download archive:** every download is recorded, so known tracks are skipped next time.
 - **Library tab** with search. Deleting moves the file to the Trash and you choose:
@@ -32,7 +33,7 @@ and [yt-dlp](https://github.com/yt-dlp/yt-dlp), with a consistent dark theme on 
 | What | Why |
 |---|---|
 | Python 3.10 or newer | runs from source |
-| ffmpeg **and** ffprobe | converts audio and embeds cover art |
+| FFmpeg | converts audio and embeds cover art. Bundled with Windows ready-to-run builds. |
 | PySide6 (Qt 6) | the window (included in the source-install dependencies) |
 | yt-dlp, mutagen | downloading and cover art in `.opus` files (included in the source-install dependencies) |
 
@@ -107,7 +108,8 @@ using the steps below.
 Download and extract the archive for your operating system. On Linux, run `./Tunegrab`, or run
 `./install-launcher.sh` from the extracted folder to add Tunegrab to KDE's application launcher.
 On Windows, run `Tunegrab.exe` from the extracted folder. Packaged builds include Python and the
-app's Python dependencies; install FFmpeg separately and ensure `ffmpeg` and `ffprobe` are on `PATH`.
+app's Python dependencies; the Windows build also includes FFmpeg, so no separate Python or FFmpeg
+installation is needed. Linux builds use the system FFmpeg.
 
 ### Windows
 
@@ -178,9 +180,9 @@ the app and its bundled Python dependencies.
 
 ## Troubleshooting
 
-**"ffmpeg is missing" dialog** - install FFmpeg and make sure both `ffmpeg` and `ffprobe` are on
-`PATH`. On Fedora, use `sudo dnf install ffmpeg-free`; on Windows, use
-`winget install Gyan.FFmpeg.Shared`.
+**"ffmpeg is missing" dialog** - install FFmpeg and make sure `ffmpeg` is on `PATH`. On Fedora,
+use `sudo dnf install ffmpeg-free`. The Windows release build includes FFmpeg; Windows source
+installs need a separate FFmpeg installation.
 
 **TLS certificate verification failed** - check that your system date and time are correct and
 your system CA certificates are current. On Fedora, run

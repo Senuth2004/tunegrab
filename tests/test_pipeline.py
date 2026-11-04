@@ -18,7 +18,7 @@ from yt_dlp.extractor.common import InfoExtractor
 import tunegrab.downloader as dl
 
 pytestmark = pytest.mark.skipif(
-    not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg not installed")
+    not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe test tools not installed")
 
 
 def ff(*args):

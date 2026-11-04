@@ -1,4 +1,6 @@
 """The Tunegrab dark theme, shared by every desktop platform."""
+import re
+
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -129,11 +131,55 @@ QToolTip {
 }
 """
 
+_LIGHT_COLORS = {
+    "#edf0f5": "#20232a",
+    "#111318": "#f4f5f8",
+    "#15181e": "#ffffff",
+    "#2b3039": "#d9dee8",
+    "#aab2bf": "#5d6573",
+    "#ffffff": "#20232a",
+    "#e0e4eb": "#303642",
+    "#20242c": "#e4e7ed",
+    "#1b1f27": "#ffffff",
+    "#303641": "#d4d9e2",
+    "#252a33": "#f0f2f6",
+    "#373e49": "#cbd1dc",
+    "#303642": "#e2e6ed",
+    "#1b1f25": "#f1f2f5",
+    "#292e36": "#e1e4ea",
+    "#292e37": "#e3e6ec",
+    "#191d24": "#f6f7f9",
+    "#34304f": "#dcd7ff",
+    "#3a414c": "#c6ccd6",
+    "#414957": "#c7cdd7",
+}
 
-def apply_theme(app: QApplication) -> None:
+LIGHT_STYLESHEET = re.sub(
+    r"#[a-fA-F0-9]{6}",
+    lambda match: _LIGHT_COLORS.get(match.group(0).lower(), match.group(0)),
+    STYLESHEET,
+)
+
+
+def apply_theme(app: QApplication, mode: str = "dark") -> None:
     app.setStyle("Fusion")
     palette = QPalette()
-    colors = {
+    light = mode == "light"
+    colors = ({
+        QPalette.ColorRole.Window: "#f4f5f8",
+        QPalette.ColorRole.WindowText: "#20232a",
+        QPalette.ColorRole.Base: "#ffffff",
+        QPalette.ColorRole.AlternateBase: "#f6f7f9",
+        QPalette.ColorRole.ToolTipBase: "#ffffff",
+        QPalette.ColorRole.ToolTipText: "#20232a",
+        QPalette.ColorRole.Text: "#20232a",
+        QPalette.ColorRole.Button: "#f0f2f6",
+        QPalette.ColorRole.ButtonText: "#20232a",
+        QPalette.ColorRole.BrightText: "#111318",
+        QPalette.ColorRole.Link: "#5947c5",
+        QPalette.ColorRole.Highlight: "#6957d5",
+        QPalette.ColorRole.HighlightedText: "#ffffff",
+    } if light else {
         QPalette.ColorRole.Window: "#15181e",
         QPalette.ColorRole.WindowText: "#edf0f5",
         QPalette.ColorRole.Base: "#1b1f27",
@@ -147,10 +193,11 @@ def apply_theme(app: QApplication) -> None:
         QPalette.ColorRole.Link: "#a99dff",
         QPalette.ColorRole.Highlight: "#6558d9",
         QPalette.ColorRole.HighlightedText: "#ffffff",
-    }
+    })
     for role, color in colors.items():
         palette.setColor(role, QColor(color))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#737c89"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#737c89"))
+    disabled = "#747c89" if light else "#737c89"
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(disabled))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(disabled))
     app.setPalette(palette)
-    app.setStyleSheet(STYLESHEET)
+    app.setStyleSheet(LIGHT_STYLESHEET if light else STYLESHEET)
